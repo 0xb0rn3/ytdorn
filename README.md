@@ -1,4 +1,4 @@
-YtDorn3
+# YtDorn3
 An advanced YouTube downloader with single video and playlist support. Clean interface with progress tracking and quality options.
 Features
 
@@ -13,15 +13,22 @@ Installation
 bashCopy# Clone the repository
 git clone https://github.com/Q4n0/ytdorn3.git
 
-# Navigate to directory
+Navigate to directory
+
 cd ytdorn3
 
 # Run the script
 python ytdorn3.py
-Dependencies are automatically installed on first run.
-Usage
-bashCopypython ytdorn3.py
-Quality Options
+
+# LINUX USERS ADVICED TO USE:
+sudo python3 ytdorn3.py
+
+N.B: Dependencies are automatically installed on first run.
+
+# Usage:
+python ytdorn3.py
+
+# Quality Options
 
 Best Quality Video (1080p or best available)
 Medium Quality Video (720p)
@@ -29,13 +36,13 @@ Low Quality Video (480p)
 Audio Only (Best Quality)
 Audio Only (Medium Quality)
 
-Requirements
+# Requirements
 
 Python 3.x
 yt-dlp (auto-installed)
 ffmpeg (auto-installed)
 
-Supported Platforms
+# Supported Platforms
 
 Linux (apt, dnf, pacman, zypper)
 macOS (homebrew)
