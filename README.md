@@ -9,11 +9,11 @@ Features
 🔄 Auto dependency installation
 🖥️ Cross-platform (Windows, Linux, Mac)
 
-Installation
-bashCopy# Clone the repository
+# Installation
+
 git clone https://github.com/Q4n0/ytdorn3.git
 
-Navigate to directory
+# Navigate to directory
 
 cd ytdorn3
 
