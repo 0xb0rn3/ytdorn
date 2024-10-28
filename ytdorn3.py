@@ -277,7 +277,7 @@ def main():
         again = input(f"\n{Colors.CYAN}🔄 Download another video/playlist? (y/n): {Colors.RESET}").strip().lower()
         if again != 'y':
             break
-   print(f"\n{Colors.GREEN}👋 Thanks for using Ytdorn3!{Colors.RESET}\n")
+            print(f"\n{Colors.GREEN}👋 Thanks for using Ytdorn3!{Colors.RESET}\n")
 
 if __name__ == "__main__":
     try:
