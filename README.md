@@ -11,7 +11,7 @@ Features
 
 # Installation
 
-git clone https://github.com/Q4n0/ytdorn3.git
+git clone https://github.com/0xb0rn3/ytdorn3.git
 
 # Navigate to directory
 
