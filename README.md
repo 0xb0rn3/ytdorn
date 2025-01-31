@@ -1,56 +1,167 @@
 # YtDorn3
-An advanced YouTube downloader with single video and playlist support. Clean interface with progress tracking and quality options.
-Features
 
-🎥 Single video downloads
-📋 Playlist support
-📊 Real-time progress bar
-🎨 Multiple quality options
-🔄 Auto dependency installation
-🖥️ Cross-platform (Windows, Linux, Mac)
+YtDorn3 is a feature-rich command-line YouTube downloader with an elegant terminal user interface. It supports downloading both single videos and playlists with various quality options and real-time progress tracking.
 
-# Installation
+![YtDorn3 Banner](https://raw.githubusercontent.com/0xb0rn3/ytdorn/main/.github/banner.png)
 
-git clone https://github.com/0xb0rn3/ytdorn3.git
+## Features
 
-# Navigate to directory
+- Beautiful terminal user interface with color gradients and animations
+- Download single videos or entire playlists
+- Multiple quality options for both video and audio
+- Real-time download progress with ETA and speed indicators
+- Automatic dependency management
+- Cross-platform support (Linux, macOS, Windows)
+- Playlist organization with automatic folder creation
+- Graceful error handling and recovery
+- Support for various audio and video formats
 
-cd ytdorn3
+## Requirements
 
-# Run the script
-python ytdorn3.py
+- Python 3.6 or higher
+- FFmpeg (automatically installed if missing)
+- yt-dlp (automatically installed if missing)
 
-# LINUX USERS ADVICED TO USE:
-sudo python3 ytdorn3.py
+## Installation
 
-N.B: Dependencies are automatically installed on first run.
+1. Clone the repository:
+```bash
+git clone https://github.com/0xb0rn3/ytdorn.git
+cd ytdorn
+```
 
-# Usage:
-python ytdorn3.py
+2. Make the script executable:
+```bash
+chmod +x ytdorn
+```
 
-# Quality Options
+3. Optional: Add to PATH for system-wide access:
+```bash
+sudo ln -s $(pwd)/ytdorn /usr/local/bin/ytdorn
+```
 
-Best Quality Video (1080p or best available)
-Medium Quality Video (720p)
-Low Quality Video (480p)
-Audio Only (Best Quality)
-Audio Only (Medium Quality)
+## Usage
 
-# Requirements
+### Basic Usage
 
-Python 3.x
-yt-dlp (auto-installed)
-ffmpeg (auto-installed)
+Simply run the script:
+```bash
+./ytdorn
+```
 
-# Supported Platforms
+Follow the interactive menu to:
+1. Choose between playlist or single video download
+2. Enter the YouTube URL
+3. Specify output directory (defaults to 'downloads')
+4. Select quality options
 
-Linux (apt, dnf, pacman, zypper)
-macOS (homebrew)
-Windows (chocolatey)
+### Quality Options
 
-Author
+1. Best Quality Video (1080p or best available)
+2. Medium Quality Video (720p)
+3. Low Quality Video (480p)
+4. Audio Only (Best Quality)
+5. Audio Only (Medium Quality)
 
-Q4n0 (https://github.com/Q4n0)
+### Examples
 
-Version
-1.3
+Download a single video:
+```bash
+./ytdorn
+# Select: Single Video Download
+# Enter URL: https://youtube.com/watch?v=example
+# Choose quality and output directory through the interactive menu
+```
+
+Download a playlist:
+```bash
+./ytdorn
+# Select: Playlist Download
+# Enter URL: https://youtube.com/playlist?list=example
+# Choose quality and output directory through the interactive menu
+```
+
+## Output Structure
+
+Downloads are organized as follows:
+
+```
+downloads/
+├── single_videos/
+│   ├── video1.mp4
+│   └── video2.mp4
+└── playlists/
+    └── Playlist_Name/
+        ├── video1.mp4
+        └── video2.mp4
+```
+
+## Dependencies
+
+YtDorn3 automatically manages its dependencies:
+
+- **yt-dlp**: Used for video extraction and downloading
+- **FFmpeg**: Required for video/audio processing
+- **Python packages**: All required packages are automatically installed
+
+## Error Handling
+
+- Graceful handling of network interruptions
+- Clear error messages with recovery suggestions
+- Automatic retry on temporary failures
+- Safe cancellation with Ctrl+C
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Known Issues
+
+- Some region-restricted videos may not download
+- Download speed depends on YouTube's server load
+- Certain live streams may not be supported
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Author
+
+**0xb0rn3** - [GitHub Profile](https://github.com/0xb0rn3)
+
+## Acknowledgments
+
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for the core downloading functionality
+- [FFmpeg](https://ffmpeg.org/) for media processing capabilities
+
+## Support
+
+For support, please open an issue on the [GitHub repository](https://github.com/0xb0rn3/ytdorn/issues).
+
+## Changelog
+
+### v1.3
+- Added gradient progress bar
+- Improved error handling
+- Enhanced playlist organization
+- Added ETA calculation
+- Improved cross-platform support
+
+### v1.2
+- Added audio-only download options
+- Enhanced terminal UI
+- Improved dependency management
+
+### v1.1
+- Added playlist support
+- Enhanced progress tracking
+- Added quality options
+
+### v1.0
+- Initial release
+- Basic video downloading
+- Terminal UI
