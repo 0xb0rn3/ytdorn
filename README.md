@@ -1,8 +1,8 @@
-# YtDorn3
+# YtDorn
 
 YtDorn3 is a feature-rich command-line YouTube downloader with an elegant terminal user interface. It supports downloading both single videos and playlists with various quality options and real-time progress tracking.
 
-![YtDorn3 Banner](https://raw.githubusercontent.com/0xb0rn3/ytdorn/main/.github/banner.png)
+![YtDorn Banner](https://raw.githubusercontent.com/0xb0rn3/ytdorn/main/.github/banner.png)
 
 ## Features
 
@@ -98,7 +98,7 @@ downloads/
 
 ## Dependencies
 
-YtDorn3 automatically manages its dependencies:
+YtDorn automatically manages its dependencies:
 
 - **yt-dlp**: Used for video extraction and downloading
 - **FFmpeg**: Required for video/audio processing
