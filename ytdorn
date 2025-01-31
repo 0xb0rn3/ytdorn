@@ -325,17 +325,23 @@ class SystemManager:
                 raise Exception("Homebrew package manager not found")
         elif os_type == "linux":
             package_managers = {
-                'apt-get': ['sudo', 'apt-get', 'update', '&&', 
-                           'sudo', 'apt-get', 'install', '-y', 'ffmpeg'],
-                'dnf': ['sudo', 'dnf', 'install', '-y', 'ffmpeg'],
-                'pacman': ['sudo', 'pacman', '-S', '--noconfirm', 'ffmpeg'],
-                'zypper': ['sudo', 'zypper', 'install', '-y', 'ffmpeg']
+                'apt-get': [
+                    ['sudo', 'apt-get', 'update'],
+                    ['sudo', 'apt-get', 'install', '-y', 'ffmpeg']
+                ],
+                'dnf': [['sudo', 'dnf', 'install', '-y', 'ffmpeg']],
+                'pacman': [['sudo', 'pacman', '-S', '--noconfirm', 'ffmpeg']],
+                'zypper': [['sudo', 'zypper', 'install', '-y', 'ffmpeg']]
             }
-            
-            for pm, cmd in package_managers.items():
+        
+            for pm, commands in package_managers.items():
                 if shutil.which(pm):
-                    subprocess.check_call(cmd)
-                    return
+                    try:
+                        for cmd in commands:
+                            subprocess.check_call(cmd)
+                        return
+                    except subprocess.CalledProcessError as e:
+                        raise Exception(f"Error running {' '.join(cmd)}: {str(e)}")
                     
             raise Exception("No supported package manager found")
 
