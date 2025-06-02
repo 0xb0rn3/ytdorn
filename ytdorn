@@ -330,9 +330,9 @@ class DependencyManager:
         time.sleep(1)
         spinner.stop()
         
-        if not deps['python']:
-            print(f"{Colors.ERROR}Python 3.7+ is required. Please upgrade Python.{Colors.RESET}")
-            return False
+#        if not deps['python3']:
+#            print(f"{Colors.ERROR}Python 3.7+ is required. Please upgrade Python.{Colors.RESET}")
+#            return False
         
         if not deps['yt-dlp']:
             spinner.start("Installing yt-dlp...")
