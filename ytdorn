@@ -323,9 +323,9 @@ class DependencyManager:
         if not deps['yt-dlp']:
             spinner.start("Installing yt-dlp...")
             try:
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install", "yt-dlp", "--upgrade"
-                ], capture_output=True)
+               subprocess.check_call([
+                   sys.executable, "-m", "pip", "install", "yt-dlp", "--upgrade"
+               ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 spinner.stop(f"{Colors.SUCCESS}✓ yt-dlp installed successfully{Colors.RESET}")
             except subprocess.CalledProcessError:
                 spinner.stop(f"{Colors.ERROR}✗ Failed to install yt-dlp{Colors.RESET}")
