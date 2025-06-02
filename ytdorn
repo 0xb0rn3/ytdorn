@@ -1,644 +1,924 @@
 #!/usr/bin/env python3
 """
-YtDorn3 - Enhanced YouTube Downloader
-A feature-rich CLI tool for downloading YouTube videos and playlists with an elegant user interface.
+YtDorn v0.1.2 - Super Powerful YouTube Downloader
+Created by: 0xb0rn3
+Advanced CLI tool for comprehensive YouTube content downloading with modern UI
 """
 
 import sys
 import platform
 import subprocess
 import os
-from typing import Tuple, Dict, Any, Optional
-import pkg_resources
+import json
+import asyncio
+import concurrent.futures
+from typing import Dict, Any, Optional, List, Tuple
 import shutil
 from datetime import datetime
 import time
 import threading
-from math import ceil
+from pathlib import Path
 import signal
 import re
-from pathlib import Path
+import argparse
+from urllib.parse import urlparse, parse_qs
+import logging
 
 class Colors:
-    """
-    Enhanced color and style management for terminal output.
-    Supports RGB colors, gradients, and various text styles.
-    """
-    # Basic ANSI colors
-    BLACK = '\033[30m'
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
+    """Enhanced color management with modern terminal styling"""
+    # Core colors
+    PRIMARY = '\033[38;2;64;224;255m'     # Bright cyan
+    SECONDARY = '\033[38;2;255;100;255m'   # Bright magenta
+    SUCCESS = '\033[38;2;0;255;127m'       # Bright green
+    WARNING = '\033[38;2;255;191;0m'       # Bright yellow
+    ERROR = '\033[38;2;255;69;58m'         # Bright red
+    INFO = '\033[38;2;175;175;255m'        # Light blue
+    MUTED = '\033[38;2;128;128;128m'       # Gray
     
     # Text styles
     BOLD = '\033[1m'
     DIM = '\033[2m'
     ITALIC = '\033[3m'
     UNDERLINE = '\033[4m'
-    BLINK = '\033[5m'
-    REVERSE = '\033[7m'
     RESET = '\033[0m'
     
-    # Background colors
-    BG_BLACK = '\033[40m'
-    BG_RED = '\033[41m'
-    BG_GREEN = '\033[42m'
-    BG_YELLOW = '\033[43m'
-    BG_BLUE = '\033[44m'
-    BG_MAGENTA = '\033[45m'
-    BG_CYAN = '\033[46m'
-    BG_WHITE = '\033[47m'
+    # Special effects
+    GLOW = '\033[5m'
+    REVERSE = '\033[7m'
 
     @staticmethod
     def rgb(r: int, g: int, b: int) -> str:
-        """Generate RGB color escape sequence."""
         return f'\033[38;2;{r};{g};{b}m'
 
     @staticmethod
-    def gradient(text: str, start_color: Tuple[int, int, int], end_color: Tuple[int, int, int]) -> str:
-        """
-        Create a color gradient effect across text.
+    def gradient_text(text: str, color1: Tuple[int, int, int], color2: Tuple[int, int, int]) -> str:
+        """Create smooth color gradient across text"""
+        if not text.strip():
+            return text
         
-        Args:
-            text: The text to apply the gradient to
-            start_color: RGB tuple for starting color
-            end_color: RGB tuple for ending color
-            
-        Returns:
-            Text with applied color gradient
-        """
         result = ""
-        for i, char in enumerate(text):
+        text_length = len([c for c in text if c.strip()])
+        char_index = 0
+        
+        for char in text:
             if char.strip():
-                progress = i / (len(text) - 1) if len(text) > 1 else 0
-                r = int(start_color[0] + (end_color[0] - start_color[0]) * progress)
-                g = int(start_color[1] + (end_color[1] - start_color[1]) * progress)
-                b = int(start_color[2] + (end_color[2] - start_color[2]) * progress)
-                result += f"\033[38;2;{r};{g};{b}m{char}"
+                progress = char_index / max(text_length - 1, 1)
+                r = int(color1[0] + (color2[0] - color1[0]) * progress)
+                g = int(color1[1] + (color2[1] - color1[1]) * progress)
+                b = int(color1[2] + (color2[2] - color1[2]) * progress)
+                result += Colors.rgb(r, g, b) + char
+                char_index += 1
             else:
                 result += char
         return result + Colors.RESET
 
-class Spinner:
-    """
-    Animated spinner for showing progress during long operations.
-    Uses threading to avoid blocking the main process.
-    """
-    def __init__(self):
-        self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        self.stop_spinner = False
-        self.spinner_thread = None
-        self._current_message = ""
+class ModernSpinner:
+    """Advanced spinner with multiple animation styles"""
+    
+    STYLES = {
+        'dots': ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
+        'pulse': ['●', '○', '◍', '◌'],
+        'wave': ['▁', '▃', '▄', '▅', '▆', '▇', '█', '▇', '▆', '▅', '▄', '▃'],
+        'arrow': ['←', '↖', '↑', '↗', '→', '↘', '↓', '↙'],
+    }
+    
+    def __init__(self, style='dots'):
+        self.frames = self.STYLES.get(style, self.STYLES['dots'])
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.message = ""
 
-    def spin(self, message: str):
-        """Animate the spinner with the given message."""
-        i = 0
-        while not self.stop_spinner:
-            sys.stdout.write(f'\r{Colors.CYAN}{self.spinner_chars[i]}{Colors.RESET} {message}')
+    def animate(self):
+        """Run the spinner animation"""
+        frame_index = 0
+        while not self.stop_event.is_set():
+            frame = self.frames[frame_index % len(self.frames)]
+            sys.stdout.write(f'\r{Colors.PRIMARY}{frame}{Colors.RESET} {self.message}')
             sys.stdout.flush()
             time.sleep(0.1)
-            i = (i + 1) % len(self.spinner_chars)
+            frame_index += 1
 
     def start(self, message: str):
-        """Start the spinner animation."""
-        self.stop_spinner = False
-        self._current_message = message
-        self.spinner_thread = threading.Thread(target=self.spin, args=(message,))
-        self.spinner_thread.daemon = True
-        self.spinner_thread.start()
+        """Start spinner with message"""
+        self.message = message
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self.animate, daemon=True)
+        self.thread.start()
 
-    def stop(self):
-        """Stop the spinner animation."""
-        self.stop_spinner = True
-        if self.spinner_thread:
-            self.spinner_thread.join()
+    def stop(self, final_message: str = None):
+        """Stop spinner and optionally show final message"""
+        self.stop_event.set()
+        if self.thread:
+            self.thread.join()
         sys.stdout.write('\r\033[K')
-        sys.stdout.flush()
+        if final_message:
+            print(final_message)
 
-class ProgressBar:
-    """
-    Enhanced progress bar with ETA calculation and adaptive formatting.
-    """
-    def __init__(self, total: int, prefix: str = '', width: int = 30):
+class AdvancedProgressBar:
+    """Modern progress bar with detailed statistics"""
+    
+    def __init__(self, total: int, description: str = "", width: int = 40):
         self.total = total
-        self.prefix = prefix
+        self.description = description
         self.width = width
         self.start_time = time.time()
         self.current = 0
+        self.speed_samples = []
+        self.last_update = time.time()
 
-    def update(self, current: int) -> str:
-        """
-        Update the progress bar with current progress.
-        
-        Args:
-            current: Current progress value
-            
-        Returns:
-            Formatted progress bar string
-        """
+    def update(self, current: int, extra_info: str = "") -> str:
+        """Update progress with enhanced statistics"""
         self.current = current
-        percentage = (current / self.total) * 100 if self.total else 0
-        filled_width = int(self.width * current / self.total) if self.total else 0
+        now = time.time()
         
-        # Create gradient progress bar
-        bar = self._create_gradient_bar(filled_width)
-        
-        # Calculate ETA
-        eta = self._calculate_eta(current)
-        
-        # Format the complete progress line
-        return (f"\r{self.prefix} [{bar}] {percentage:5.1f}% "
-                f"({self._format_size(current)}/{self._format_size(self.total)}) {eta}")
-
-    def _create_gradient_bar(self, filled_width: int) -> str:
-        """Create a gradient-colored progress bar."""
-        gradient_bar = ''
-        for i in range(filled_width):
-            color_val = int(255 * (i / self.width))
-            gradient_bar += Colors.rgb(100, 200-color_val, 255) + '█'
-        
-        return gradient_bar + Colors.DIM + '░' * (self.width - filled_width) + Colors.RESET
-
-    def _calculate_eta(self, current: int) -> str:
-        """Calculate and format the estimated time remaining."""
-        if current <= 0:
-            return "ETA: --:--"
+        # Calculate speed with smoothing
+        if now - self.last_update > 0.5:  # Update speed every 0.5 seconds
+            if self.speed_samples:
+                speed = (current - self.speed_samples[-1][1]) / (now - self.speed_samples[-1][0])
+            else:
+                speed = current / (now - self.start_time) if now > self.start_time else 0
             
-        elapsed = time.time() - self.start_time
-        rate = current / elapsed if elapsed > 0 else 0
-        remaining = (self.total - current) / rate if rate > 0 else 0
+            self.speed_samples.append((now, current))
+            if len(self.speed_samples) > 10:  # Keep last 10 samples
+                self.speed_samples.pop(0)
+            self.last_update = now
+
+        # Calculate percentage and bar
+        percentage = (current / self.total * 100) if self.total > 0 else 0
+        filled = int(self.width * current / self.total) if self.total > 0 else 0
         
-        return f"ETA: {self._format_time(remaining)}"
+        # Create modern progress bar with gradient
+        bar_chars = '█▉▊▋▌▍▎▏'
+        bar = ''
+        for i in range(filled):
+            intensity = min(255, 50 + (i * 205 // self.width))
+            bar += Colors.rgb(intensity, 100, 255) + '█'
+        
+        if filled < self.width:
+            bar += Colors.MUTED + '░' * (self.width - filled)
+        bar += Colors.RESET
 
-    @staticmethod
-    def _format_size(bytes: int) -> str:
-        """Format byte size to human readable format."""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if bytes < 1024:
-                return f"{bytes:.1f}{unit}"
-            bytes /= 1024
-        return f"{bytes:.1f}PB"
-
-    @staticmethod
-    def _format_time(seconds: float) -> str:
-        """Format seconds into human readable time."""
-        if seconds < 60:
-            return f"{seconds:.0f}s"
-        elif seconds < 3600:
-            minutes = seconds / 60
-            return f"{minutes:.0f}m"
+        # Calculate ETA
+        elapsed = now - self.start_time
+        if current > 0 and elapsed > 0:
+            rate = current / elapsed
+            eta_seconds = (self.total - current) / rate if rate > 0 else 0
+            eta = self._format_duration(eta_seconds)
         else:
-            hours = seconds / 3600
-            return f"{hours:.1f}h"
+            eta = "--:--"
 
-class Console:
-    """
-    Console UI management class handling menus and user interaction.
-    """
+        # Format sizes
+        current_size = self._format_bytes(current)
+        total_size = self._format_bytes(self.total)
+        
+        # Get current speed
+        current_speed = ""
+        if self.speed_samples:
+            recent_speed = (current - self.speed_samples[0][1]) / max(now - self.speed_samples[0][0], 1)
+            current_speed = f" @ {self._format_bytes(recent_speed)}/s"
+
+        return (f"\r{Colors.PRIMARY}▶{Colors.RESET} {self.description[:30]:<30} "
+                f"[{bar}] {percentage:5.1f}% "
+                f"({current_size}/{total_size}){current_speed} "
+                f"ETA: {eta} {extra_info}")
+
+    @staticmethod
+    def _format_bytes(bytes_val: float) -> str:
+        """Format bytes with appropriate units"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if bytes_val < 1024:
+                return f"{bytes_val:.1f}{unit}"
+            bytes_val /= 1024
+        return f"{bytes_val:.1f}PB"
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        """Format duration in human readable format"""
+        if seconds < 60:
+            return f"{int(seconds)}s"
+        elif seconds < 3600:
+            return f"{int(seconds // 60)}m {int(seconds % 60)}s"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            return f"{hours}h {minutes}m"
+
+class ModernUI:
+    """Advanced terminal UI with modern design elements"""
+    
     @staticmethod
     def print_banner():
-        """Display the application banner with ASCII art."""
-        banner = """
-        ╭──────────────────────────────────────╮
-        │   __   _____ ____                    │
-        │   \ \ / /_  /_  /  ___  ____  ____  │
-        │    \ V / / / / / / _ \/ __ \/ __ \  │
-        │    / . \/ /_/ /_/  __/ /_/ / / / /  │
-        │   /_/ \_\___/___/\___/\____/_/ /_/  │
-        │                                      │
-        ╰──────────────────────────────────────╯
-        """
-        print(Colors.gradient(banner, (100, 200, 255), (150, 100, 255)))
-        print(f"{Colors.CYAN}{Colors.BOLD}YtDorn3 {Colors.RESET}"
-              f"{Colors.CYAN}v1.3 by Q4n0{Colors.RESET}")
-        print(f"{Colors.DIM}https://github.com/Q4n0{Colors.RESET}")
-        print(Colors.gradient('═' * 50, (100, 200, 255), (150, 100, 255)) + "\n")
+        """Display enhanced banner with version info"""
+        banner_text = """
+╭─────────────────────────────────────────────╮
+│  ██╗   ██╗████████╗██████╗  ██████╗ ██████╗ │
+│  ╚██╗ ██╔╝╚══██╔══╝██╔══██╗██╔═══██╗██╔══██╗│
+│   ╚████╔╝    ██║   ██║  ██║██║   ██║██████╔╝│
+│    ╚██╔╝     ██║   ██║  ██║██║   ██║██╔══██╗│
+│     ██║      ██║   ██████╔╝╚██████╔╝██║  ██║│
+│     ╚═╝      ╚═╝   ╚═════╝  ╚═════╝ ╚═╝  ╚═╝│
+╰─────────────────────────────────────────────╯"""
+        
+        print(Colors.gradient_text(banner_text, (64, 224, 255), (255, 100, 255)))
+        print(f"\n{Colors.PRIMARY}{Colors.BOLD}YtDorn v0.1.2{Colors.RESET} {Colors.MUTED}by 0xb0rn3{Colors.RESET}")
+        print(f"{Colors.INFO}Super Powerful YouTube Downloader{Colors.RESET}")
+        print(f"{Colors.MUTED}https://github.com/0xb0rn3{Colors.RESET}")
+        print(Colors.gradient_text('═' * 50, (64, 224, 255), (255, 100, 255)))
 
     @staticmethod
-    def create_menu(title: str, options: list, previous_selection: Optional[str] = None) -> str:
-        """
-        Create an interactive menu with the given options.
+    def create_interactive_menu(title: str, options: List[Tuple[str, str, str]], 
+                               show_shortcuts: bool = True) -> str:
+        """Create modern interactive menu with shortcuts and descriptions"""
+        print(f"\n{Colors.PRIMARY}{Colors.BOLD}┌─ {title} ─┐{Colors.RESET}")
         
-        Args:
-            title: Menu title
-            options: List of (key, label) tuples for menu options
-            previous_selection: Previously selected option (for highlighting)
-            
-        Returns:
-            Selected option key
-        """
-        print(f"\n{Colors.CYAN}{Colors.BOLD}{title}{Colors.RESET}")
-        print(f"{Colors.DIM}{'─' * 40}{Colors.RESET}")
+        for i, (key, title_text, description) in enumerate(options, 1):
+            icon = key if len(key) == 1 else str(i)
+            shortcut = f"[{icon}]" if show_shortcuts else f"[{i}]"
+            print(f"{Colors.INFO}{shortcut:<4}{Colors.RESET} {title_text}")
+            if description:
+                print(f"     {Colors.MUTED}{description}{Colors.RESET}")
         
-        for idx, (key, label) in enumerate(options, 1):
-            prefix = '├──' if idx < len(options) else '└──'
-            if previous_selection and str(idx) == previous_selection:
-                print(f"{Colors.DIM}{prefix}{Colors.RESET} "
-                      f"{Colors.GREEN}✓{Colors.RESET} {label}")
-            else:
-                print(f"{Colors.DIM}{prefix}{Colors.RESET} {label}")
+        print(f"{Colors.PRIMARY}└{'─' * (len(title) + 4)}┘{Colors.RESET}")
         
         while True:
-            choice = input(f"\n{Colors.CYAN}Select option (1-{len(options)}): "
-                         f"{Colors.RESET}").strip()
-            if choice in [str(i) for i in range(1, len(options) + 1)]:
-                return choice
-            print(f"{Colors.RED}Invalid selection. Please try again.{Colors.RESET}")
-
-class SystemManager:
-    """
-    Handles system-related operations like dependency management.
-    """
-    @staticmethod
-    def check_dependencies() -> Tuple[bool, bool]:
-        """Check if required dependencies are installed."""
-        yt_dlp_installed = shutil.which('yt-dlp') is not None
-        try:
-            pkg_resources.get_distribution('yt-dlp')
-            yt_dlp_installed = True
-        except pkg_resources.DistributionNotFound:
-            pass
-        
-        ffmpeg_installed = shutil.which('ffmpeg') is not None
-        return yt_dlp_installed, ffmpeg_installed
+            prompt = f"\n{Colors.PRIMARY}❯{Colors.RESET} Select option: "
+            choice = input(prompt).strip().lower()
+            
+            # Check for direct key match or number
+            for i, (key, _, _) in enumerate(options, 1):
+                if choice == key.lower() or choice == str(i):
+                    return str(i)
+            
+            print(f"{Colors.ERROR}Invalid selection. Please try again.{Colors.RESET}")
 
     @staticmethod
-    def install_dependencies(spinner: Spinner):
-        """Install required system dependencies."""
-        os_type = platform.system().lower()
-        yt_dlp_installed, ffmpeg_installed = SystemManager.check_dependencies()
+    def get_user_input(prompt: str, default: str = None, validator=None) -> str:
+        """Enhanced input with validation and defaults"""
+        display_default = f" ({default})" if default else ""
+        full_prompt = f"{Colors.PRIMARY}❯{Colors.RESET} {prompt}{Colors.MUTED}{display_default}{Colors.RESET}: "
         
-        spinner.start("Checking dependencies...")
-        time.sleep(1)  # Give visual feedback
+        while True:
+            value = input(full_prompt).strip()
+            if not value and default:
+                return default
+            if not value:
+                print(f"{Colors.ERROR}This field is required.{Colors.RESET}")
+                continue
+            if validator and not validator(value):
+                print(f"{Colors.ERROR}Invalid input. Please try again.{Colors.RESET}")
+                continue
+            return value
+
+    @staticmethod
+    def show_info_panel(title: str, items: Dict[str, str]):
+        """Display information in a modern panel format"""
+        max_key_length = max(len(key) for key in items.keys()) if items else 0
+        
+        print(f"\n{Colors.INFO}┌─ {title} {'─' * (max_key_length + 20)}")
+        for key, value in items.items():
+            print(f"{Colors.INFO}│{Colors.RESET} {key:<{max_key_length}} : {Colors.PRIMARY}{value}{Colors.RESET}")
+        print(f"{Colors.INFO}└{'─' * (max_key_length + len(title) + 25)}{Colors.RESET}")
+
+class DependencyManager:
+    """Advanced dependency management with better error handling"""
+    
+    @staticmethod
+    def check_system_dependencies() -> Dict[str, bool]:
+        """Comprehensive dependency check"""
+        deps = {}
+        
+        # Check yt-dlp
+        deps['yt-dlp'] = shutil.which('yt-dlp') is not None
+        if not deps['yt-dlp']:
+            try:
+                import yt_dlp
+                deps['yt-dlp'] = True
+            except ImportError:
+                pass
+        
+        # Check ffmpeg
+        deps['ffmpeg'] = shutil.which('ffmpeg') is not None
+        
+        # Check Python version
+        deps['python'] = sys.version_info >= (3, 7)
+        
+        return deps
+
+    @staticmethod
+    def install_missing_dependencies(spinner: ModernSpinner):
+        """Install missing dependencies with progress feedback"""
+        deps = DependencyManager.check_system_dependencies()
+        
+        if all(deps.values()):
+            return True
+        
+        spinner.start("Checking system dependencies...")
+        time.sleep(1)
         spinner.stop()
         
-        if not yt_dlp_installed:
-            print(f"\n{Colors.YELLOW}Installing yt-dlp...{Colors.RESET}")
+        if not deps['python']:
+            print(f"{Colors.ERROR}Python 3.7+ is required. Please upgrade Python.{Colors.RESET}")
+            return False
+        
+        if not deps['yt-dlp']:
+            spinner.start("Installing yt-dlp...")
             try:
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", "yt-dlp", 
-                     "--break-system-packages"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                print(f"{Colors.GREEN}✓ yt-dlp installed successfully!{Colors.RESET}")
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", "yt-dlp", "--upgrade"
+                ], capture_output=True)
+                spinner.stop(f"{Colors.SUCCESS}✓ yt-dlp installed successfully{Colors.RESET}")
             except subprocess.CalledProcessError:
-                try:
-                    subprocess.check_call(
-                        [sys.executable, "-m", "pip", "install", "yt-dlp"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
-                    print(f"{Colors.GREEN}✓ yt-dlp installed successfully!{Colors.RESET}")
-                except subprocess.CalledProcessError:
-                    print(f"{Colors.RED}✗ Error installing yt-dlp.{Colors.RESET}")
-                    SystemManager._show_manual_install_instructions()
-                    sys.exit(1)
+                spinner.stop(f"{Colors.ERROR}✗ Failed to install yt-dlp{Colors.RESET}")
+                return False
         
-        if not ffmpeg_installed:
-            print(f"\n{Colors.YELLOW}Installing ffmpeg...{Colors.RESET}")
-            try:
-                SystemManager._install_ffmpeg_for_os(os_type)
-                print(f"{Colors.GREEN}✓ ffmpeg installed successfully!{Colors.RESET}")
-            except Exception as e:
-                print(f"{Colors.RED}✗ Error installing ffmpeg: {str(e)}{Colors.RESET}")
-                print("Please install ffmpeg manually from: "
-                      "https://ffmpeg.org/download.html")
-                sys.exit(1)
+        if not deps['ffmpeg']:
+            spinner.start("Setting up ffmpeg...")
+            if DependencyManager._install_ffmpeg():
+                spinner.stop(f"{Colors.SUCCESS}✓ ffmpeg configured successfully{Colors.RESET}")
+            else:
+                spinner.stop(f"{Colors.WARNING}⚠ ffmpeg not found - some features may be limited{Colors.RESET}")
+        
+        return True
 
     @staticmethod
-    def _install_ffmpeg_for_os(os_type: str):
-        """Install ffmpeg for the specific operating system."""
-        if os_type == "windows":
-            if shutil.which('choco'):
-                subprocess.check_call(['choco', 'install', 'ffmpeg', '-y'])
-            else:
-                raise Exception("Chocolatey package manager not found")
-        elif os_type == "darwin":
-            if shutil.which('brew'):
-                subprocess.check_call(['brew', 'install', 'ffmpeg'])
-            else:
-                raise Exception("Homebrew package manager not found")
-        elif os_type == "linux":
-            package_managers = {
-                'apt-get': [
-                    ['sudo', 'apt-get', 'update'],
-                    ['sudo', 'apt-get', 'install', '-y', 'ffmpeg']
-                ],
-                'dnf': [['sudo', 'dnf', 'install', '-y', 'ffmpeg']],
-                'pacman': [['sudo', 'pacman', '-S', '--noconfirm', 'ffmpeg']],
-                'zypper': [['sudo', 'zypper', 'install', '-y', 'ffmpeg']]
-            }
+    def _install_ffmpeg() -> bool:
+        """Attempt to install ffmpeg based on the system"""
+        system = platform.system().lower()
         
-            for pm, commands in package_managers.items():
-                if shutil.which(pm):
-                    try:
+        try:
+            if system == "windows":
+                # Try winget first, then chocolatey
+                for cmd in [['winget', 'install', 'ffmpeg'], ['choco', 'install', 'ffmpeg', '-y']]:
+                    if shutil.which(cmd[0]):
+                        subprocess.check_call(cmd, capture_output=True)
+                        return True
+            elif system == "darwin":
+                if shutil.which('brew'):
+                    subprocess.check_call(['brew', 'install', 'ffmpeg'], capture_output=True)
+                    return True
+            elif system == "linux":
+                # Try multiple package managers
+                pkg_managers = [
+                    (['apt', 'update'], ['apt', 'install', '-y', 'ffmpeg']),
+                    (['dnf', 'install', '-y', 'ffmpeg'],),
+                    (['pacman', '-S', '--noconfirm', 'ffmpeg'],),
+                    (['zypper', 'install', '-y', 'ffmpeg'],)
+                ]
+                
+                for commands in pkg_managers:
+                    if shutil.which(commands[0][0]):
                         for cmd in commands:
-                            subprocess.check_call(cmd)
-                        return
-                    except subprocess.CalledProcessError as e:
-                        raise Exception(f"Error running {' '.join(cmd)}: {str(e)}")
-                    
-            raise Exception("No supported package manager found")
+                            subprocess.check_call(cmd, capture_output=True)
+                        return True
+        except subprocess.CalledProcessError:
+            pass
+        
+        return False
 
-    @staticmethod
-    def _show_manual_install_instructions():
-        """Show instructions for manual installation."""
-        print("\nTry installing manually with either:")
-        print("1. pip install yt-dlp --break-system-packages")
-        print("2. pip install yt-dlp --user")
-        print("3. Create and use a virtual environment first")
-
-class Downloader:
-    """
-    Handles video and playlist downloads with progress tracking.
-    """
+class SuperDownloader:
+    """Advanced downloader with comprehensive YouTube support"""
+    
     def __init__(self):
         self.progress_bars = {}
-        self.start_times = {}
-
+        self.download_stats = {}
+        self.concurrent_downloads = 3
+        
     def download_hook(self, d: Dict[str, Any]):
-        """
-        Progress hook for yt-dlp downloads.
-        Handles both download progress and completion status.
-        """
+        """Enhanced progress hook with detailed tracking"""
+        filename = d.get('filename', 'Unknown')
+        base_filename = os.path.basename(filename)
+        
         if d['status'] == 'downloading':
-            filename = os.path.basename(d.get('filename', ''))
-            if filename:
-                # Initialize progress tracking for new downloads
-                if filename not in self.progress_bars:
-                    self.start_times[filename] = time.time()
-                    total_bytes = d.get('total_bytes', 0)
-                self.progress_bars[filename] = ProgressBar(
-                    total_bytes,
-                    prefix=f"{Colors.CYAN}↓{Colors.RESET} {filename[:40]}..."
+            if base_filename not in self.progress_bars:
+                total_bytes = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
+                self.progress_bars[base_filename] = AdvancedProgressBar(
+                    total_bytes, 
+                    base_filename[:25]
                 )
-
-                downloaded_bytes = d.get('downloaded_bytes', 0)
-                speed = d.get('speed', 0)
-                
-                # Update progress bar
-                progress_str = self.progress_bars[filename].update(downloaded_bytes)
-                speed_str = f" @ {ProgressBar._format_size(speed)}/s" if speed else ""
-                sys.stdout.write(f"{progress_str}{speed_str}")
-                sys.stdout.flush()
-
+                self.download_stats[base_filename] = {'start_time': time.time()}
+            
+            downloaded = d.get('downloaded_bytes', 0)
+            speed = d.get('speed', 0)
+            
+            extra_info = ""
+            if speed:
+                extra_info = f"({AdvancedProgressBar._format_bytes(speed)}/s)"
+            
+            progress_line = self.progress_bars[base_filename].update(downloaded, extra_info)
+            sys.stdout.write(progress_line)
+            sys.stdout.flush()
+            
         elif d['status'] == 'finished':
-            filename = os.path.basename(d.get('filename', ''))
-            if filename in self.start_times:
-                duration = time.time() - self.start_times[filename]
+            if base_filename in self.progress_bars:
+                duration = time.time() - self.download_stats[base_filename]['start_time']
                 sys.stdout.write('\r\033[K')
-                print(f"\r{Colors.GREEN}✓ {filename} downloaded in "
-                      f"{ProgressBar._format_time(duration)}{Colors.RESET}")
-                del self.progress_bars[filename]
-                del self.start_times[filename]
-                sys.stdout.flush()
+                print(f"{Colors.SUCCESS}✓ {base_filename} completed in "
+                      f"{AdvancedProgressBar._format_duration(duration)}{Colors.RESET}")
+                del self.progress_bars[base_filename]
+                del self.download_stats[base_filename]
 
-    def download_playlist(self, playlist_url: str, output_dir: str = 'downloads',
-                         format_choice: str = '1'):
-        """
-        Download a complete YouTube playlist.
-        
-        Args:
-            playlist_url: URL of the playlist
-            output_dir: Directory to save downloaded files
-            format_choice: Quality/format selection for download
-        """
+    def get_video_info(self, url: str) -> Dict[str, Any]:
+        """Extract comprehensive video information"""
         from yt_dlp import YoutubeDL
         
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        format_options = self._get_format_options(format_choice)
         ydl_opts = {
-            'outtmpl': os.path.join(output_dir, '%(playlist)s', '%(title)s.%(ext)s'),
-            'ignoreerrors': True,
-            'noplaylist': False,
             'quiet': True,
             'no_warnings': True,
-            'progress_hooks': [self.download_hook],
-            'no_color': True,
-            'extract_flat': True,
-            'logger': self._get_quiet_logger()
+            'extract_flat': False,
         }
-        ydl_opts.update(format_options)
-
-        try:
-            print(f"\n{Colors.CYAN}📥 Initializing playlist download...{Colors.RESET}")
-            with YoutubeDL(ydl_opts) as ydl:
-                # First pass: get playlist info
-                info = ydl.extract_info(playlist_url, download=False)
-                playlist_title = info.get('title', 'Playlist')
-                video_count = len(info['entries'])
-                
-                print(f"\n{Colors.CYAN}📑 Playlist: {Colors.RESET}{playlist_title}")
-                print(f"{Colors.CYAN}📊 Total videos: {Colors.RESET}{video_count}\n")
-                
-                # Second pass: actual download
-                ydl_opts['extract_flat'] = False
-                with YoutubeDL(ydl_opts) as ydl_download:
-                    ydl_download.download([playlist_url])
-
-            print(f"\n{Colors.GREEN}✨ Playlist download completed successfully!{Colors.RESET}")
-            print(f"{Colors.CYAN}📂 Files saved in: {Colors.RESET}"
-                  f"{os.path.abspath(output_dir)}\n")
-
-        except Exception as e:
-            print(f'\n{Colors.RED}❌ Error downloading playlist: {str(e)}{Colors.RESET}')
-            raise
-
-    def download_single_video(self, video_url: str, output_dir: str = 'downloads',
-                            format_choice: str = '1'):
-        """
-        Download a single YouTube video.
         
-        Args:
-            video_url: URL of the video
-            output_dir: Directory to save downloaded file
-            format_choice: Quality/format selection for download
-        """
+        with YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                return self._process_video_info(info)
+            except Exception as e:
+                raise Exception(f"Could not extract video info: {str(e)}")
+
+    def _process_video_info(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        """Process and clean video information"""
+        processed = {
+            'title': info.get('title', 'Unknown'),
+            'uploader': info.get('uploader', 'Unknown'),
+            'duration': info.get('duration', 0),
+            'view_count': info.get('view_count', 0),
+            'upload_date': info.get('upload_date', ''),
+            'description': info.get('description', '')[:200] + '...' if info.get('description') else '',
+            'formats': len(info.get('formats', [])),
+            'is_live': info.get('is_live', False),
+            'is_playlist': 'entries' in info,
+        }
+        
+        if processed['is_playlist']:
+            processed['playlist_count'] = len(info.get('entries', []))
+            processed['playlist_title'] = info.get('title', 'Unknown Playlist')
+        
+        return processed
+
+    def download_with_options(self, url: str, options: Dict[str, Any]):
+        """Download with comprehensive options"""
         from yt_dlp import YoutubeDL
         
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        format_options = self._get_format_options(format_choice)
+        # Build yt-dlp options
         ydl_opts = {
-            'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
+            'outtmpl': options.get('output_template', '%(title)s.%(ext)s'),
+            'format': options.get('format', 'best'),
+            'writesubtitles': options.get('subtitles', False),
+            'writeautomaticsub': options.get('auto_subtitles', False),
+            'writethumbnail': options.get('thumbnail', False),
+            'writedescription': options.get('description', False),
+            'writeinfojson': options.get('metadata', False),
             'ignoreerrors': True,
-            'quiet': True,
             'no_warnings': True,
             'progress_hooks': [self.download_hook],
-            'no_color': True,
-            'logger': self._get_quiet_logger()
         }
-        ydl_opts.update(format_options)
-
+        
+        # Add post-processors based on options
+        postprocessors = []
+        
+        if options.get('extract_audio'):
+            postprocessors.append({
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': options.get('audio_format', 'mp3'),
+                'preferredquality': options.get('audio_quality', '192'),
+            })
+        
+        if options.get('embed_subs'):
+            postprocessors.append({
+                'key': 'FFmpegEmbedSubtitle',
+            })
+        
+        if postprocessors:
+            ydl_opts['postprocessors'] = postprocessors
+        
+        # Handle playlist options
+        if options.get('playlist_items'):
+            ydl_opts['playlist_items'] = options['playlist_items']
+        
         try:
-            print(f"\n{Colors.CYAN}📥 Initializing video download...{Colors.RESET}")
             with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                video_title = info.get('title', 'Video')
-                print(f"\n{Colors.CYAN}🎬 Video: {Colors.RESET}{video_title}")
-                ydl.download([video_url])
-
-            print(f"\n{Colors.GREEN}✨ Video download completed successfully!{Colors.RESET}")
-            print(f"{Colors.CYAN}📂 File saved in: {Colors.RESET}"
-                  f"{os.path.abspath(output_dir)}\n")
-
+                ydl.download([url])
+            return True
         except Exception as e:
-            print(f'\n{Colors.RED}❌ Error downloading video: {str(e)}{Colors.RESET}')
-            raise
+            print(f"{Colors.ERROR}Download failed: {str(e)}{Colors.RESET}")
+            return False
 
     @staticmethod
-    def _get_format_options(choice: str) -> Dict[str, Any]:
-        """Get format options based on user selection."""
-        formats = {
-            '1': {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                'format_note': 'Best Quality Video'
-            },
-            '2': {
-                'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/'
-                         'best[height<=720][ext=mp4]/best',
-                'format_note': '720p Video'
-            },
-            '3': {
-                'format': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/'
-                         'best[height<=480][ext=mp4]/best',
-                'format_note': '480p Video'
-            },
-            '4': {
-                'format': 'bestaudio[ext=m4a]/bestaudio/best',
-                'format_note': 'Best Quality Audio',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'm4a',
-                    'preferredquality': '192',
-                }]
-            },
-            '5': {
-                'format': 'worstaudio/worst',
-                'format_note': 'Medium Quality Audio',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'm4a',
-                    'preferredquality': '128',
-                }]
-            }
-        }
-        return formats.get(choice, formats['1'])
+    def get_format_options() -> List[Tuple[str, str, str]]:
+        """Get available format options with descriptions"""
+        return [
+            ('best', '🎬 Best Quality', 'Highest available quality (video + audio)'),
+            ('1080p', '📺 1080p HD', 'Full HD quality (1920x1080)'),
+            ('720p', '📹 720p HD', 'HD quality (1280x720)'),
+            ('480p', '📱 480p SD', 'Standard definition (854x480)'),
+            ('audio', '🎵 Audio Only', 'Extract audio only (best quality)'),
+            ('mp3', '🎶 MP3 Audio', 'Convert to MP3 format'),
+            ('custom', '⚙️ Custom', 'Specify custom format'),
+        ]
 
-    @staticmethod
-    def _get_quiet_logger():
-        """Create a quiet logger for yt-dlp."""
-        return type('QuietLogger', (), {
-            'debug': lambda *args, **kw: None,
-            'warning': lambda *args, **kw: None,
-            'error': lambda *args, **kw: None,
-        })()
+def create_advanced_options_menu() -> Dict[str, Any]:
+    """Create comprehensive options selection"""
+    ui = ModernUI()
+    options = {}
+    
+    # Output directory
+    options['output_dir'] = ui.get_user_input(
+        "Output directory", 
+        default="downloads",
+        validator=lambda x: True  # Allow any directory name
+    )
+    
+    # Format selection
+    format_options = SuperDownloader.get_format_options()
+    format_choice = ui.create_interactive_menu("Format Selection", format_options)
+    format_map = {
+        '1': 'best[ext=mp4]/best',
+        '2': 'best[height<=1080][ext=mp4]/best[height<=1080]',
+        '3': 'best[height<=720][ext=mp4]/best[height<=720]',
+        '4': 'best[height<=480][ext=mp4]/best[height<=480]',
+        '5': 'bestaudio',
+        '6': 'bestaudio[ext=m4a]/bestaudio',
+        '7': ui.get_user_input("Enter custom format string", default="best")
+    }
+    options['format'] = format_map.get(format_choice, 'best')
+    
+    # Additional options
+    extra_options = [
+        ('y', '📥 Download subtitles', ''),
+        ('n', '❌ Skip subtitles', ''),
+    ]
+    sub_choice = ui.create_interactive_menu("Subtitle Options", extra_options)
+    options['subtitles'] = sub_choice == '1'
+    
+    extra_features = [
+        ('y', '🖼️ Download thumbnail', ''),
+        ('n', '❌ Skip thumbnail', ''),
+    ]
+    thumb_choice = ui.create_interactive_menu("Thumbnail Options", extra_features)
+    options['thumbnail'] = thumb_choice == '1'
+    
+    # Set output template
+    safe_title = "%(title).100s"
+    if options['subtitles'] or options['thumbnail']:
+        template = f"{options['output_dir']}/{safe_title}.%(ext)s"
+    else:
+        template = f"{options['output_dir']}/{safe_title}.%(ext)s"
+    options['output_template'] = template
+    
+    return options
+
+def validate_url(url: str) -> bool:
+    """Validate YouTube URL"""
+    youtube_domains = ['youtube.com', 'youtu.be', 'm.youtube.com', 'music.youtube.com']
+    try:
+        parsed = urlparse(url)
+        return any(domain in parsed.netloc for domain in youtube_domains)
+    except:
+        return False
 
 def main():
-    """Main program entry point."""
-    # Initialize components
-    spinner = Spinner()
-    console = Console()
-    downloader = Downloader()
+    """Enhanced main function with comprehensive features"""
+    # Setup
+    ui = ModernUI()
+    spinner = ModernSpinner()
+    downloader = SuperDownloader()
     
-    # Setup signal handlers
+    # Signal handler for graceful exit
     def signal_handler(signum, frame):
-        print(f"\n\n{Colors.YELLOW}👋 Download canceled. Goodbye!{Colors.RESET}\n")
+        print(f"\n\n{Colors.WARNING}🛑 Download interrupted. Exiting gracefully...{Colors.RESET}\n")
         sys.exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Show banner and check dependencies
-    console.print_banner()
-    SystemManager.install_dependencies(spinner)
-    print(f"\n{Colors.GREEN}✓ System ready!{Colors.RESET}")
+    # Display banner
+    ui.print_banner()
+    
+    # Check dependencies
+    if not DependencyManager.install_missing_dependencies(spinner):
+        print(f"{Colors.ERROR}Failed to install required dependencies. Exiting.{Colors.RESET}")
+        sys.exit(1)
+    
+    print(f"\n{Colors.SUCCESS}🚀 System ready! All dependencies satisfied.{Colors.RESET}")
     
     while True:
-        print(f"\n{Colors.gradient('═' * 50, (100, 200, 255), (150, 100, 255))}")
-        
-        # Main menu options
-        download_options = [
-            ('playlist', '📋 Playlist Download'),
-            ('single', '🎥 Single Video Download'),
-            ('exit', '🚪 Exit')
-        ]
-        
-        choice = console.create_menu("Download Type", download_options)
-        
-        if choice == '3':  # Exit option
-            print(f"\n{Colors.GREEN}👋 Thanks for using YtDorn3!{Colors.RESET}\n")
-            break
-            
-        # Get URL and validate
-        url = input(f"\n{Colors.CYAN}🔗 Enter URL: {Colors.RESET}").strip()
-        if not url:
-            print(f"{Colors.RED}Please enter a valid URL.{Colors.RESET}")
-            continue
-            
-        # Validate URL format
-        is_playlist = 'playlist' in url or 'list=' in url
-        if choice == '1' and not is_playlist:
-            print(f"\n{Colors.YELLOW}⚠️  This appears to be a single video URL. "
-                  f"Would you like to:{Colors.RESET}")
-            options = [
-                ('single', 'Download as single video'),
-                ('new', 'Enter a different URL')
-            ]
-            subchoice = console.create_menu("URL Type", options)
-            if subchoice == '2':
-                continue
-            choice = '2'
-        elif choice == '2' and is_playlist:
-            print(f"\n{Colors.YELLOW}⚠️  This appears to be a playlist URL. "
-                  f"Would you like to:{Colors.RESET}")
-            options = [
-                ('playlist', 'Download entire playlist'),
-                ('new', 'Enter a different URL')
-            ]
-            subchoice = console.create_menu("URL Type", options)
-            if subchoice == '2':
-                continue
-            choice = '1'
-        
-        # Get output directory
-        output_dir = input(f"{Colors.CYAN}📁 Enter output directory "
-                         f"(press Enter for 'downloads'): {Colors.RESET}").strip()
-        if not output_dir:
-            output_dir = 'downloads'
-        
-        # Quality options menu
-        quality_options = [
-            ('best', '🎥 Best Quality Video (1080p or best available)'),
-            ('720p', '🎥 Medium Quality Video (720p)'),
-            ('480p', '🎥 Low Quality Video (480p)'),
-            ('audio-high', '🎵 Audio Only (Best Quality)'),
-            ('audio-medium', '🎵 Audio Only (Medium Quality)')
-        ]
-        format_choice = console.create_menu("Quality Options", quality_options)
-        
         try:
-            if choice == '1':
-                downloader.download_playlist(url, output_dir, format_choice)
-            else:
-                downloader.download_single_video(url, output_dir, format_choice)
+            print(f"\n{Colors.gradient_text('═' * 60, (64, 224, 255), (255, 100, 255))}")
+            
+            # Main menu
+            main_options = [
+                ('s', '🎥 Single Video', 'Download individual video'),
+                ('p', '📋 Playlist/Channel', 'Download playlist or entire channel'),
+                ('i', '📊 Video Info', 'Get detailed video information'),
+                ('q', '🚪 Quit', 'Exit the application'),
+            ]
+            
+            choice = ui.create_interactive_menu("Main Menu", main_options)
+            
+            if choice == '4':  # Quit
+                print(f"\n{Colors.SUCCESS}👋 Thank you for using YtDorn! Goodbye!{Colors.RESET}\n")
+                break
+            
+            # Get URL
+            url = ui.get_user_input("YouTube URL", validator=validate_url)
+            
+            if choice == '3':  # Video info
+                spinner.start("Extracting video information...")
+                try:
+                    info = downloader.get_video_info(url)
+                    spinner.stop()
+                    
+                    # Display info
+                    info_items = {
+                        'Title': info['title'],
+                        'Uploader': info['uploader'],
+                        'Duration': AdvancedProgressBar._format_duration(info['duration']),
+                        'Views': f"{info['view_count']:,}" if info['view_count'] else 'Unknown',
+                        'Upload Date': info['upload_date'],
+                        'Available Formats': str(info['formats']),
+                        'Is Live': 'Yes' if info['is_live'] else 'No',
+                    }
+                    
+                    if info['is_playlist']:
+                        info_items['Playlist Title'] = info['playlist_title']
+                        info_items['Video Count'] = str(info['playlist_count'])
+                    
+                    ui.show_info_panel("Video Information", info_items)
+                    
+                except Exception as e:
+                    spinner.stop(f"{Colors.ERROR}Failed to get video info: {str(e)}{Colors.RESET}")
+                
+                continue
+            
+            # Get download options
+            spinner.start("Analyzing video...")
+            try:
+                info = downloader.get_video_info(url)
+                spinner.stop()
+                
+                # Show basic info
+                basic_info = {
+                    'Title': info['title'][:50] + '...' if len(info['title']) > 50 else info['title'],
+                    'Type': 'Playlist' if info['is_playlist'] else 'Single Video',
+                    'Duration/Count': (f"{info['playlist_count']} videos" if info['is_playlist'] 
+                                     else AdvancedProgressBar._format_duration(info['duration'])),
+                }
+                ui.show_info_panel("Download Preview", basic_info)
+                
+            except Exception as e:
+                spinner.stop(f"{Colors.ERROR}Error: {str(e)}{Colors.RESET}")
+                continue
+            
+            # Get advanced options
+            options = create_advanced_options_menu()
+            
+            # Confirm download
+            confirm_options = [
+                ('y', '✅ Start Download', 'Begin downloading with selected options'),
+                ('n', '❌ Cancel', 'Return to main menu'),
+                ('m', '⚙️ Modify Options', 'Change download settings'),
+            ]
+            
+            confirm_choice = ui.create_interactive_menu("Confirm Download", confirm_options)
+            
+            if confirm_choice == '2':  # Cancel
+                continue
+            elif confirm_choice == '3':  # Modify options
+                options = create_advanced_options_menu()
+                confirm_choice = '1'  # Proceed with download
+            
+            if confirm_choice == '1':  # Start download
+                print(f"\n{Colors.PRIMARY}🚀 Starting download...{Colors.RESET}")
+                
+                # Create output directory
+                os.makedirs(options['output_dir'], exist_ok=True)
+                
+                # Start download
+                success = downloader.download_with_options(url, options)
+                
+                if success:
+                    print(f"\n{Colors.SUCCESS}✨ Download completed successfully!{Colors.RESET}")
+                    print(f"{Colors.INFO}📁 Files saved to: {os.path.abspath(options['output_dir'])}{Colors.RESET}")
+                else:
+                    print(f"\n{Colors.ERROR}❌ Download failed. Please check the URL and try again.{Colors.RESET}")
+        
+        except KeyboardInterrupt:
+            print(f"\n\n{Colors.WARNING}🛑 Operation cancelled by user.{Colors.RESET}")
+            continue
         except Exception as e:
-            print(f"{Colors.RED}An error occurred: {str(e)}{Colors.RESET}")
+            print(f"\n{Colors.ERROR}❌ Unexpected error: {str(e)}{Colors.RESET}")
             continue
         
-        # Ask to download another
-        again = input(f"\n{Colors.CYAN}🔄 Download another video/playlist? (y/n): "
-                     f"{Colors.RESET}").strip().lower()
-        if again != 'y':
-            print(f"\n{Colors.GREEN}👋 Thanks for using YtDorn3!{Colors.RESET}\n")
+        # Ask if user wants to continue
+        continue_options = [
+            ('y', '🔄 Download Another', 'Start a new download'),
+            ('n', '🚪 Exit', 'Quit the application'),
+        ]
+        
+        continue_choice = ui.create_interactive_menu("Continue?", continue_options)
+        if continue_choice == '2':
+            print(f"\n{Colors.SUCCESS}👋 Thank you for using YtDorn! Goodbye!{Colors.RESET}\n")
             break
 
+class BatchDownloader:
+    """Handle batch downloads from file or multiple URLs"""
+    
+    @staticmethod
+    def download_from_file(file_path: str, options: Dict[str, Any]) -> bool:
+        """Download multiple URLs from a text file"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                urls = [line.strip() for line in f if line.strip() and validate_url(line.strip())]
+            
+            if not urls:
+                print(f"{Colors.ERROR}No valid URLs found in file.{Colors.RESET}")
+                return False
+            
+            print(f"{Colors.INFO}Found {len(urls)} valid URLs to download.{Colors.RESET}")
+            
+            downloader = SuperDownloader()
+            successful = 0
+            
+            for i, url in enumerate(urls, 1):
+                print(f"\n{Colors.PRIMARY}📥 Downloading {i}/{len(urls)}{Colors.RESET}")
+                if downloader.download_with_options(url, options):
+                    successful += 1
+                else:
+                    print(f"{Colors.WARNING}⚠️ Skipping failed URL: {url}{Colors.RESET}")
+            
+            print(f"\n{Colors.SUCCESS}✅ Batch download completed: {successful}/{len(urls)} successful{Colors.RESET}")
+            return True
+            
+        except FileNotFoundError:
+            print(f"{Colors.ERROR}File not found: {file_path}{Colors.RESET}")
+            return False
+        except Exception as e:
+            print(f"{Colors.ERROR}Error processing file: {str(e)}{Colors.RESET}")
+            return False
+
+class ConfigManager:
+    """Manage user configurations and presets"""
+    
+    CONFIG_FILE = os.path.expanduser("~/.ytdorn_config.json")
+    
+    @staticmethod
+    def load_config() -> Dict[str, Any]:
+        """Load user configuration"""
+        try:
+            if os.path.exists(ConfigManager.CONFIG_FILE):
+                with open(ConfigManager.CONFIG_FILE, 'r') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return ConfigManager._get_default_config()
+    
+    @staticmethod
+    def save_config(config: Dict[str, Any]) -> bool:
+        """Save user configuration"""
+        try:
+            with open(ConfigManager.CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=2)
+            return True
+        except Exception:
+            return False
+    
+    @staticmethod
+    def _get_default_config() -> Dict[str, Any]:
+        """Get default configuration"""
+        return {
+            'default_output_dir': 'downloads',
+            'default_format': 'best',
+            'auto_subtitles': False,
+            'download_thumbnails': False,
+            'concurrent_downloads': 3,
+            'presets': {
+                'high_quality': {
+                    'format': 'best[ext=mp4]/best',
+                    'subtitles': True,
+                    'thumbnail': True,
+                },
+                'audio_only': {
+                    'format': 'bestaudio',
+                    'extract_audio': True,
+                    'audio_format': 'mp3',
+                },
+                'mobile': {
+                    'format': 'best[height<=720]',
+                    'subtitles': False,
+                    'thumbnail': False,
+                }
+            }
+        }
+
+def setup_argument_parser() -> argparse.ArgumentParser:
+    """Setup command line argument parser"""
+    parser = argparse.ArgumentParser(
+        description='YtDorn v0.1.2 - Super Powerful YouTube Downloader',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                                    # Interactive mode
+  %(prog)s -u "URL" -f best                   # Quick download
+  %(prog)s -u "URL" -f audio --extract-audio  # Audio only
+  %(prog)s --batch urls.txt                   # Batch download
+  %(prog)s --info "URL"                       # Get video info only
+        """
+    )
+    
+    parser.add_argument('-u', '--url', help='YouTube URL to download')
+    parser.add_argument('-f', '--format', default='best', help='Video format/quality')
+    parser.add_argument('-o', '--output', default='downloads', help='Output directory')
+    parser.add_argument('--extract-audio', action='store_true', help='Extract audio only')
+    parser.add_argument('--audio-format', default='mp3', help='Audio format (mp3, m4a, wav)')
+    parser.add_argument('--subtitles', action='store_true', help='Download subtitles')
+    parser.add_argument('--thumbnail', action='store_true', help='Download thumbnail')
+    parser.add_argument('--batch', help='Batch download from file')
+    parser.add_argument('--info', help='Get video information only')
+    parser.add_argument('--preset', help='Use configuration preset')
+    parser.add_argument('--list-presets', action='store_true', help='List available presets')
+    parser.add_argument('--quiet', '-q', action='store_true', help='Quiet mode')
+    parser.add_argument('--version', action='version', version='YtDorn v0.1.2 by 0xb0rn3')
+    
+    return parser
+
+def run_cli_mode(args):
+    """Run in command line mode with arguments"""
+    if args.list_presets:
+        config = ConfigManager.load_config()
+        print("Available presets:")
+        for name, settings in config['presets'].items():
+            print(f"  {name}: {settings}")
+        return
+    
+    if args.info:
+        downloader = SuperDownloader()
+        try:
+            info = downloader.get_video_info(args.info)
+            print(json.dumps(info, indent=2))
+        except Exception as e:
+            print(f"Error: {str(e)}", file=sys.stderr)
+            sys.exit(1)
+        return
+    
+    # Build options from command line arguments
+    options = {
+        'output_dir': args.output,
+        'format': args.format,
+        'subtitles': args.subtitles,
+        'thumbnail': args.thumbnail,
+        'extract_audio': args.extract_audio,
+        'audio_format': args.audio_format,
+    }
+    
+    # Apply preset if specified
+    if args.preset:
+        config = ConfigManager.load_config()
+        if args.preset in config['presets']:
+            preset = config['presets'][args.preset]
+            options.update(preset)
+        else:
+            print(f"Error: Preset '{args.preset}' not found", file=sys.stderr)
+            sys.exit(1)
+    
+    # Set output template
+    options['output_template'] = f"{options['output_dir']}/%(title).100s.%(ext)s"
+    
+    downloader = SuperDownloader()
+    
+    if args.batch:
+        # Batch download mode
+        batch_downloader = BatchDownloader()
+        success = batch_downloader.download_from_file(args.batch, options)
+        sys.exit(0 if success else 1)
+    
+    elif args.url:
+        # Single URL download
+        if not validate_url(args.url):
+            print("Error: Invalid YouTube URL", file=sys.stderr)
+            sys.exit(1)
+        
+        os.makedirs(options['output_dir'], exist_ok=True)
+        success = downloader.download_with_options(args.url, options)
+        sys.exit(0 if success else 1)
+    
+    else:
+        print("Error: No URL or batch file specified", file=sys.stderr)
+        sys.exit(1)
+
 if __name__ == "__main__":
-    main()
+    try:
+        # Check if running in CLI mode (with arguments)
+        parser = setup_argument_parser()
+        args = parser.parse_args()
+        
+        # If any CLI arguments provided, run in CLI mode
+        if any(vars(args).values()):
+            run_cli_mode(args)
+        else:
+            # Run in interactive mode
+            main()
+            
+    except KeyboardInterrupt:
+        print(f"\n{Colors.WARNING}🛑 Application interrupted by user. Goodbye!{Colors.RESET}")
+        sys.exit(0)
+    except Exception as e:
+        print(f"{Colors.ERROR}Fatal error: {str(e)}{Colors.RESET}")
+        sys.exit(1)
