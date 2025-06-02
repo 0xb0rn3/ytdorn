@@ -291,7 +291,7 @@ class DependencyManager:
         deps['yt-dlp'] = shutil.which('yt-dlp') is not None
         if not deps['yt-dlp']:
             try:
-                import yt_dlp
+                import yt-dlp 
                 deps['yt-dlp'] = True
             except ImportError:
                 pass
@@ -323,9 +323,9 @@ class DependencyManager:
         if not deps['yt-dlp']:
             spinner.start("Installing yt-dlp...")
             try:
-               subprocess.check_call([
-                   sys.executable, "-m", "pip", "install", "yt-dlp", "--upgrade"
-               ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", "yt-dlp", "--upgrade"
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 spinner.stop(f"{Colors.SUCCESS}✓ yt-dlp installed successfully{Colors.RESET}")
             except subprocess.CalledProcessError:
                 spinner.stop(f"{Colors.ERROR}✗ Failed to install yt-dlp{Colors.RESET}")
@@ -361,7 +361,7 @@ class DependencyManager:
                 pkg_managers = [
                     (['apt', 'update'], ['apt', 'install', '-y', 'ffmpeg']),
                     (['dnf', 'install', '-y', 'ffmpeg'],),
-                    (['pacman', '-S', '--noconfirm', 'ffmpeg'],),
+                    (['pacman', '-Sy', '--noconfirm', 'ffmpeg'],),
                     (['zypper', 'install', '-y', 'ffmpeg'],)
                 ]
                 
@@ -903,15 +903,11 @@ def run_cli_mode(args):
         print("Error: No URL or batch file specified", file=sys.stderr)
         sys.exit(1)
 
-# FIND THIS SECTION AT THE BOTTOM OF YOUR FILE (starting around line 945):
-# Replace everything from "if __name__ == "__main__":" to the end
-
 if __name__ == "__main__":
     try:
         # Check if running in CLI mode (with arguments)
         parser = setup_argument_parser()
         args = parser.parse_args()
-        
         # Check if meaningful CLI arguments were provided
         # These are the arguments that actually indicate the user wants CLI mode
         meaningful_args = [
