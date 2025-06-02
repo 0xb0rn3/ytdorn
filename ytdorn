@@ -342,7 +342,7 @@ class DependencyManager:
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 spinner.stop(f"{Colors.SUCCESS}✓ yt-dlp installed successfully{Colors.RESET}")
             except subprocess.CalledProcessError:
-                spinner.stop(f"{Colors.ERROR}✗ Failed to install yt-dlp manually install using pipx install yt-dlp or pip install yt-dlp {Colors.RESET}")
+                spinner.stop(f"{Colors.ERROR}✗ Failed to install yt-dlp Please manually install using pipx install yt-dlp or pip install yt-dlp OR verify you have pip {Colors.RESET}")
                 return False
         
         if not deps['ffmpeg']:
