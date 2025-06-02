@@ -287,22 +287,36 @@ class DependencyManager:
         """Comprehensive dependency check"""
         deps = {}
         
-        # Check yt-dlp
+        # Check yt-dlp - Note: package name is 'yt-dlp' but import name is 'yt_dlp'
+        # First check if command-line tool is available
         deps['yt-dlp'] = shutil.which('yt-dlp') is not None
+        
+        # If command-line tool isn't found, check if Python module is available
         if not deps['yt-dlp']:
             try:
-                import 'yt-dlp' 
+                # Import using underscore, not hyphen
+                import yt_dlp
                 deps['yt-dlp'] = True
             except ImportError:
+                # Both command-line and Python module checks failed
                 pass
         
-        # Check ffmpeg
-        deps['ffmpeg'] = shutil.which('ffmpeg') is not None
-        
-        # Check Python version
-        deps['python'] = sys.version_info >= (3, 7)
-        
         return deps
+    
+    @staticmethod
+    def get_installation_instructions(missing_deps: List[str]) -> Dict[str, str]:
+        """Provide installation instructions for missing dependencies"""
+        instructions = {}
+        
+        for dep in missing_deps:
+            if dep == 'yt-dlp':
+                instructions[dep] = (
+                    "Install yt-dlp using one of these methods:\n"
+                    "  pip install yt-dlp\n"
+                    "  Or visit: https://github.com/yt-dlp/yt-dlp#installation"
+                )
+        
+        return instructions
 
     @staticmethod
     def install_missing_dependencies(spinner: ModernSpinner):
