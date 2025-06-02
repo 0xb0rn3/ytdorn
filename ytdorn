@@ -375,7 +375,7 @@ class DependencyManager:
                 pkg_managers = [
                     (['apt', 'update'], ['apt', 'install', '-y', 'ffmpeg']),
                     (['dnf', 'install', '-y', 'ffmpeg'],),
-                    (['pacman', '-Sy', '--noconfirm', 'ffmpeg'],),
+                    (['pacman', '-Sy', '--noconfirm', 'ffmpeg-full'],),
                     (['zypper', 'install', '-y', 'ffmpeg'],)
                 ]
                 
