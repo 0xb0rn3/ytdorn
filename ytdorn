@@ -291,7 +291,7 @@ class DependencyManager:
         deps['yt-dlp'] = shutil.which('yt-dlp') is not None
         if not deps['yt-dlp']:
             try:
-                import yt-dlp 
+                import 'yt-dlp' 
                 deps['yt-dlp'] = True
             except ImportError:
                 pass
