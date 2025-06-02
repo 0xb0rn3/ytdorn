@@ -95,7 +95,17 @@ downloads/
         ├── video1.mp4
         └── video2.mp4
 ```
+# Interactive mode
+python ytdorn.py
 
+# Quick download
+python ytdorn.py -u "https://youtube.com/watch?v=..." -f best
+
+# Audio extraction
+python ytdorn.py -u "URL" --extract-audio --audio-format mp3
+
+# Batch download
+python ytdorn.py --batch urls.txt --preset high_quality
 ## Dependencies
 
 YtDorn automatically manages its dependencies:
