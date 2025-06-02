@@ -903,17 +903,29 @@ def run_cli_mode(args):
         print("Error: No URL or batch file specified", file=sys.stderr)
         sys.exit(1)
 
+# FIND THIS SECTION AT THE BOTTOM OF YOUR FILE (starting around line 945):
+# Replace everything from "if __name__ == "__main__":" to the end
+
 if __name__ == "__main__":
     try:
         # Check if running in CLI mode (with arguments)
         parser = setup_argument_parser()
         args = parser.parse_args()
         
-        # If any CLI arguments provided, run in CLI mode
-        if any(vars(args).values()):
+        # Check if meaningful CLI arguments were provided
+        # These are the arguments that actually indicate the user wants CLI mode
+        meaningful_args = [
+            args.url,           # User provided a URL to download
+            args.batch,         # User provided a batch file
+            args.info,          # User wants video info only
+            args.list_presets   # User wants to see available presets
+        ]
+        
+        # Only run CLI mode if user provided meaningful arguments
+        if any(meaningful_args):
             run_cli_mode(args)
         else:
-            # Run in interactive mode
+            # No meaningful arguments provided, so run interactive mode
             main()
             
     except KeyboardInterrupt:
