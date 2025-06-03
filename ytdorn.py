@@ -35,24 +35,53 @@ try:
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
-    print("Installing rich for better terminal experience...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "rich"])
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich.text import Text
-    from rich.prompt import Prompt, Confirm
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
-    from rich.style import Style
-    from rich.align import Align
+    print("=" * 60)
+    print("🚨 MISSING DEPENDENCIES DETECTED")
+    print("=" * 60)
+    print("YtDorn requires the 'rich' library for the best experience.")
+    print("")
+    print("📦 INSTALLATION OPTIONS:")
+    print("")
+    print("1. System Package Manager (Recommended for Arch Linux):")
+    print("   sudo pacman -S python-rich python-yt-dlp")
+    print("")
+    print("2. Virtual Environment:")
+    print("   python -m venv ytdorn-env")
+    print("   source ytdorn-env/bin/activate")
+    print("   pip install rich yt-dlp")
+    print("")
+    print("3. Override System Protection (Not Recommended):")
+    print("   pip install --break-system-packages rich yt-dlp")
+    print("")
+    print("After installation, run YtDorn again!")
+    print("=" * 60)
+    sys.exit(1)
 
 # YouTube-DL imports
 try:
     import yt_dlp
 except ImportError:
-    print("Installing yt-dlp...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
-    import yt_dlp
+    print("=" * 60)
+    print("🚨 MISSING yt-dlp DEPENDENCY")
+    print("=" * 60)
+    print("YtDorn requires 'yt-dlp' for YouTube downloading functionality.")
+    print("")
+    print("📦 INSTALLATION OPTIONS:")
+    print("")
+    print("1. System Package Manager (Recommended for Arch Linux):")
+    print("   sudo pacman -S python-yt-dlp")
+    print("")
+    print("2. Virtual Environment:")
+    print("   python -m venv ytdorn-env")
+    print("   source ytdorn-env/bin/activate")
+    print("   pip install yt-dlp")
+    print("")
+    print("3. Override System Protection (Not Recommended):")
+    print("   pip install --break-system-packages yt-dlp")
+    print("")
+    print("After installation, run YtDorn again!")
+    print("=" * 60)
+    sys.exit(1)
 
 # Initialize rich console
 console = Console()
