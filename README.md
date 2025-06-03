@@ -1,177 +1,178 @@
-# YtDorn
+YtDorn v0.1.2
 
-YtDorn3 is a feature-rich command-line YouTube downloader with an elegant terminal user interface. It supports downloading both single videos and playlists with various quality options and real-time progress tracking.
+YtDorn is a powerful and user-friendly command-line tool for downloading YouTube content. It features a modern terminal interface, offering a rich interactive experience alongside robust command-line capabilities for scripting and quick downloads.
+Key Features
 
-![YtDorn Banner](https://raw.githubusercontent.com/0xb0rn3/ytdorn/main/.github/banner.png)
+    Interactive Mode: A colorful, menu-driven interface with spinners, progress bars (including ETA & speed), and guided selections.
 
-## Features
+    Versatile Downloading: Supports single videos, specific playlist items, entire playlists, and channel content.
 
-- Beautiful terminal user interface with color gradients and animations
-- Download single videos or entire playlists
-- Multiple quality options for both video and audio
-- Real-time download progress with ETA and speed indicators
-- Automatic dependency management
-- Cross-platform support (Linux, macOS, Windows)
-- Playlist organization with automatic folder creation
-- Graceful error handling and recovery
-- Support for various audio and video formats
+    Quality & Format Control: Choose from various video resolutions, audio-only extraction (e.g., M4A, Opus), and MP3 conversion.
 
-## Requirements
+    CLI Power: Execute downloads directly from the command line with arguments for URL, format, output, and more.
 
-- Python 3.6 or higher
-- FFmpeg (automatically installed if missing)
-- yt-dlp (automatically installed if missing)
+    Batch Downloads: Process a list of URLs from a text file.
 
-## Installation
+    Configuration & Presets: Customize default settings and create presets for common download scenarios via ~/.ytdorn_config.json.
 
-1. Clone the repository:
-```bash
-git clone https://github.com/0xb0rn3/ytdorn.git
-cd ytdorn
-```
+    Smart Directory Handling: Remembers recent output directories and allows setting new defaults interactively.
 
-2. Make the script executable:
-```bash
-chmod +x ytdorn
-```
+    Dependency Management: Automatically checks for yt-dlp and attempts installation if missing. Warns about missing FFmpeg.
 
-3. Optional: Add to PATH for system-wide access:
-```bash
-sudo ln -s $(pwd)/ytdorn /usr/local/bin/ytdorn
-```
+    Cross-Platform: Designed to run on Linux, macOS, and Windows.
 
-## Usage
+    Metadata & Extras: Option to download subtitles (and embed them), thumbnails, description files, and metadata JSON.
 
-### Basic Usage
+Prerequisites
 
-Simply run the script:
-```bash
-./ytdorn
-```
+    Python: Version 3.7 or higher.
 
-Follow the interactive menu to:
-1. Choose between playlist or single video download
-2. Enter the YouTube URL
-3. Specify output directory (defaults to 'downloads')
-4. Select quality options
+    yt-dlp: The core download engine. YtDorn will attempt to install it via pip if not found.
 
-### Quality Options
+    FFmpeg: Highly recommended for audio extraction, format conversion, and embedding subtitles. YtDorn will warn if it's missing.
 
-1. Best Quality Video (1080p or best available)
-2. Medium Quality Video (720p)
-3. Low Quality Video (480p)
-4. Audio Only (Best Quality)
-5. Audio Only (Medium Quality)
+Installation
 
-### Examples
+    Clone the Repository:
 
-Download a single video:
-```bash
-./ytdorn
-# Select: Single Video Download
-# Enter URL: https://youtube.com/watch?v=example
-# Choose quality and output directory through the interactive menu
-```
+    git clone [https://github.com/0xb0rn3/ytdorn.git](https://github.com/0xb0rn3/ytdorn.git)
+    cd ytdorn
 
-Download a playlist:
-```bash
-./ytdorn
-# Select: Playlist Download
-# Enter URL: https://youtube.com/playlist?list=example
-# Choose quality and output directory through the interactive menu
-```
+    Run the Script:
+    The script is typically named ytdorn.py (or similar).
 
-## Output Structure
+    python ytdorn.py
 
-Downloads are organized as follows:
+    You can make it executable (chmod +x ytdorn.py) for easier calling (./ytdorn.py).
 
-```
-downloads/
-├── single_videos/
-│   ├── video1.mp4
-│   └── video2.mp4
-└── playlists/
-    └── Playlist_Name/
-        ├── video1.mp4
-        └── video2.mp4
-```
-# Interactive mode
+    Optional: Add to PATH:
+    For system-wide access (e.g., by just typing ytdorn):
+
+    # Example for Linux/macOS (ensure script is executable)
+    # sudo ln -s /path/to/your/cloned/ytdorn/ytdorn.py /usr/local/bin/ytdorn
+
+Getting Started
+Interactive Mode (Recommended for most users)
+
+Launch YtDorn without any arguments:
+
 python ytdorn.py
 
-# Quick download
-python ytdorn.py -u "https://youtube.com/watch?v=..." -f best
+You'll be guided through a series of menus:
 
-# Audio extraction
-python ytdorn.py -u "URL" --extract-audio --audio-format mp3
+    Main Menu: Select download type (single video, full playlist, info, etc.).
 
-# Batch download
-python ytdorn.py --batch urls.txt --preset high_quality
-## Dependencies
+    URL Input: Provide the YouTube link.
 
-YtDorn automatically manages its dependencies:
+    Download Preview: Basic information about the content will be shown.
 
-- **yt-dlp**: Used for video extraction and downloading
-- **FFmpeg**: Required for video/audio processing
-- **Python packages**: All required packages are automatically installed
+    Output Directory: Choose from default, recent paths, or specify a new one.
 
-## Error Handling
+    Format Selection: Pick your desired video/audio quality and format.
 
-- Graceful handling of network interruptions
-- Clear error messages with recovery suggestions
-- Automatic retry on temporary failures
-- Safe cancellation with Ctrl+C
+    Additional Options: Configure subtitles, thumbnails, etc.
 
-## Contributing
+    Confirmation: Review and start the download.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Command-Line Interface (CLI)
 
-## Known Issues
+For quick tasks or scripting, use CLI arguments. Here are some common examples:
 
-- Some region-restricted videos may not download
-- Download speed depends on YouTube's server load
-- Certain live streams may not be supported
+    Download a video (best quality, default output):
 
-## License
+    python ytdorn.py -u "YOUR_YOUTUBE_VIDEO_URL"
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+    Download 720p video to a specific folder:
 
-## Author
+    python ytdorn.py -u "VIDEO_URL" -f 720p -o "/path/to/videos"
 
-**0xb0rn3** - [GitHub Profile](https://github.com/0xb0rn3)
+    Extract audio as MP3:
 
-## Acknowledgments
+    python ytdorn.py -u "VIDEO_URL" --extract-audio --audio-format mp3
 
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for the core downloading functionality
-- [FFmpeg](https://ffmpeg.org/) for media processing capabilities
+    Batch download from urls.txt using a preset:
 
-## Support
+    python ytdorn.py --batch urls.txt --preset high_quality_mp4
 
-For support, please open an issue on the [GitHub repository](https://github.com/0xb0rn3/ytdorn/issues).
+    Get video info (JSON output):
 
-## Changelog
+    python ytdorn.py --info "VIDEO_URL"
 
-### v1.3
-- Added gradient progress bar
-- Improved error handling
-- Enhanced playlist organization
-- Added ETA calculation
-- Improved cross-platform support
+    List available presets:
 
-### v1.2
-- Added audio-only download options
-- Enhanced terminal UI
-- Improved dependency management
+    python ytdorn.py --list-presets
 
-### v1.1
-- Added playlist support
-- Enhanced progress tracking
-- Added quality options
+    View all CLI options:
 
-### v1.0
-- Initial release
-- Basic video downloading
-- Terminal UI
+    python ytdorn.py --help
+
+Download Options Summary
+
+    Content Types: Single videos, full playlists, channel content, specific playlist items.
+
+    Video Quality: Best available, 1080p, 720p, 480p (MP4 preferred).
+
+    Audio Extraction: Best quality audio (e.g., M4A, Opus) or convert to MP3 (e.g., 192kbps).
+
+    Custom Formats: Advanced users can specify any valid yt-dlp format string.
+
+    Extras: Subtitles (download & embed), thumbnails, description files, metadata JSON.
+
+Output & Configuration
+
+    Output Directory: Chosen interactively or via CLI (-o). Defaults are managed in the config file (typically ~/Downloads/YtDorn or a preset-defined path).
+
+    Configuration File: Located at ~/.ytdorn_config.json. Stores default output directory, recent paths, and user-defined presets.
+
+    Presets: Define collections of settings (format, output directory, extras) for quick use in both interactive and CLI modes.
+
+Dependencies Management
+
+    yt-dlp: Automatically checked on startup. If missing, YtDorn attempts to install it using pip.
+
+    FFmpeg: Checked for availability. If not found, a warning is displayed, as some features (like MP3 conversion or embedding subtitles) require it. Users are typically guided to install it manually via their system's package manager (e.g., apt, brew, choco) or from ffmpeg.org.
+
+Contributing
+
+Contributions are welcome! Please follow these steps:
+
+    Fork the repository (https://github.com/0xb0rn3/ytdorn.git).
+
+    Create a new branch for your feature (git checkout -b feature/your-feature-name).
+
+    Commit your changes (git commit -am 'Add some amazing feature').
+
+    Push to the branch (git push origin feature/your-feature-name).
+
+    Open a Pull Request.
+
+License
+
+This project is licensed under the MIT License. See the LICENSE file for full details.
+Author
+
+0xb0rn3 - GitHub Profile
+Acknowledgments
+
+    The yt-dlp team for their incredible download library.
+
+    The FFmpeg project for their indispensable multimedia framework.
+
+Support
+
+If you encounter any issues or have suggestions, please open an issue on the GitHub repository issues page.
+Changelog (YtDorn v0.1.2)
+
+This version (v0.1.2) represents a significant enhancement with a focus on a rich interactive experience and a capable command-line interface.
+
+    UI/UX: Modern terminal interface with colors, dynamic spinners, and detailed progress bars. Interactive menus for all download operations.
+
+    Core Functionality: Robust downloading of videos, playlists, and channels. Extensive format and quality selection. Audio extraction and MP3 conversion.
+
+    Configuration: External JSON configuration for defaults and presets. Smart tracking of recent output directories.
+
+    CLI: Comprehensive command-line arguments for non-interactive use and scripting, including batch processing and preset utilization.
+
+    Dependencies: Automated yt-dlp installation check and FFmpeg availability warning.
+
+    Error Handling: Improved error reporting and graceful interruption.
