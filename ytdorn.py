@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """
-YtDorn - Super Powerful YouTube Downloader
-Version: 0.1.2
-Author: 0xb0rn3
-GitHub: https://github.com/0xb0rn3/ytdorn
-
-A modern, fast, and user-friendly YouTube downloader with rich terminal interface.
+Enhanced YtDorn - Fast Multi-threaded YouTube Downloader
+Version: 1.0.0
+Minimal interface, maximum performance
 """
 
 import sys
@@ -15,259 +12,304 @@ import subprocess
 import argparse
 import asyncio
 import concurrent.futures
+import threading
+import signal
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 from urllib.parse import urlparse, parse_qs
-import threading
-import signal
+from dataclasses import dataclass
 
-# Rich terminal interface imports
+# Auto-install dependencies with fallback
+def auto_install_dependencies():
+    """Auto-install required dependencies with multiple methods."""
+    required_packages = ['rich', 'yt-dlp']
+    missing_packages = []
+    
+    # Check which packages are missing
+    for package in required_packages:
+        try:
+            if package == 'rich':
+                import rich
+            elif package == 'yt-dlp':
+                import yt_dlp
+        except ImportError:
+            missing_packages.append(package)
+    
+    if not missing_packages:
+        return True
+    
+    print(f"Installing missing packages: {', '.join(missing_packages)}")
+    
+    # Try multiple installation methods
+    install_methods = [
+        # System package manager (Arch Linux)
+        lambda pkg: subprocess.run(['sudo', 'pacman', '-S', '--noconfirm', f'python-{pkg}'], 
+                                  capture_output=True),
+        # pip with break-system-packages
+        lambda pkg: subprocess.run([sys.executable, '-m', 'pip', 'install', 
+                                  '--break-system-packages', pkg], capture_output=True),
+        # regular pip
+        lambda pkg: subprocess.run([sys.executable, '-m', 'pip', 'install', pkg], 
+                                  capture_output=True),
+    ]
+    
+    for package in missing_packages:
+        installed = False
+        for method in install_methods:
+            try:
+                result = method(package)
+                if result.returncode == 0:
+                    print(f"✓ Installed {package}")
+                    installed = True
+                    break
+            except Exception:
+                continue
+        
+        if not installed:
+            print(f"✗ Failed to install {package}. Please install manually.")
+            return False
+    
+    return True
+
+# Auto-install before importing
+if not auto_install_dependencies():
+    sys.exit(1)
+
+# Now import the dependencies
 try:
     from rich.console import Console
     from rich.table import Table
     from rich.panel import Panel
-    from rich.text import Text
     from rich.prompt import Prompt, Confirm
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
-    from rich.style import Style
-    from rich.align import Align
-    RICH_AVAILABLE = True
-except ImportError:
-    RICH_AVAILABLE = False
-    print("=" * 60)
-    print("🚨 MISSING DEPENDENCIES DETECTED")
-    print("=" * 60)
-    print("YtDorn requires the 'rich' library for the best experience.")
-    print("")
-    print("📦 INSTALLATION OPTIONS:")
-    print("")
-    print("1. System Package Manager (Recommended for Arch Linux):")
-    print("   sudo pacman -S python-rich python-yt-dlp")
-    print("")
-    print("2. Virtual Environment:")
-    print("   python -m venv ytdorn-env")
-    print("   source ytdorn-env/bin/activate")
-    print("   pip install rich yt-dlp")
-    print("")
-    print("3. Override System Protection (Not Recommended):")
-    print("   pip install --break-system-packages rich yt-dlp")
-    print("")
-    print("After installation, run YtDorn again!")
-    print("=" * 60)
-    sys.exit(1)
-
-# YouTube-DL imports
-try:
+    from rich.progress import Progress, TaskID
     import yt_dlp
-except ImportError:
-    print("=" * 60)
-    print("🚨 MISSING yt-dlp DEPENDENCY")
-    print("=" * 60)
-    print("YtDorn requires 'yt-dlp' for YouTube downloading functionality.")
-    print("")
-    print("📦 INSTALLATION OPTIONS:")
-    print("")
-    print("1. System Package Manager (Recommended for Arch Linux):")
-    print("   sudo pacman -S python-yt-dlp")
-    print("")
-    print("2. Virtual Environment:")
-    print("   python -m venv ytdorn-env")
-    print("   source ytdorn-env/bin/activate")
-    print("   pip install yt-dlp")
-    print("")
-    print("3. Override System Protection (Not Recommended):")
-    print("   pip install --break-system-packages yt-dlp")
-    print("")
-    print("After installation, run YtDorn again!")
-    print("=" * 60)
+except ImportError as e:
+    print(f"Import error after installation: {e}")
     sys.exit(1)
 
-# Initialize rich console
 console = Console()
 
-class YtDornConfig:
-    """Configuration manager for YtDorn settings and presets."""
+@dataclass
+class DownloadTask:
+    """Represents a single download task."""
+    url: str
+    title: str
+    output_path: str
+    options: Dict
+    status: str = "pending"
+    progress: float = 0.0
+    error: Optional[str] = None
+
+class DirectoryNavigator:
+    """Enhanced directory navigation and selection."""
     
     def __init__(self):
-        self.config_path = Path.home() / ".ytdorn_config.json"
-        self.config = self.load_config()
+        self.home_dir = Path.home()
+        self.current_dir = self.home_dir
+        self.bookmarks = self._load_bookmarks()
     
-    def load_config(self) -> Dict:
-        """Load configuration from file or create default."""
-        if self.config_path.exists():
+    def _load_bookmarks(self) -> Dict[str, str]:
+        """Load directory bookmarks."""
+        bookmark_file = self.home_dir / ".ytdorn_bookmarks.json"
+        if bookmark_file.exists():
             try:
-                with open(self.config_path, 'r') as f:
+                with open(bookmark_file, 'r') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
         
-        # Default configuration
+        # Default bookmarks
         return {
-            "recent_dirs": [],
-            "default_quality": "best",
-            "default_format": "mp4",
-            "presets": {
-                "high_quality_mp4": {
-                    "format": "1080p",
-                    "extract_audio": False,
-                    "subtitles": True,
-                    "thumbnails": True,
-                    "description": "High quality MP4 with subtitles"
-                },
-                "audio_only": {
-                    "format": "best",
-                    "extract_audio": True,
-                    "audio_format": "mp3",
-                    "subtitles": False,
-                    "thumbnails": True,
-                    "description": "Audio extraction to MP3"
-                }
-            }
+            "Downloads": str(self.home_dir / "Downloads"),
+            "Desktop": str(self.home_dir / "Desktop"),
+            "Documents": str(self.home_dir / "Documents"),
+            "Videos": str(self.home_dir / "Videos"),
+            "Music": str(self.home_dir / "Music"),
         }
     
-    def save_config(self):
-        """Save current configuration to file."""
+    def _save_bookmarks(self):
+        """Save directory bookmarks."""
+        bookmark_file = self.home_dir / ".ytdorn_bookmarks.json"
         try:
-            with open(self.config_path, 'w') as f:
-                json.dump(self.config, f, indent=2)
-        except IOError as e:
-            console.print(f"[yellow]Warning: Could not save config: {e}[/yellow]")
+            with open(bookmark_file, 'w') as f:
+                json.dump(self.bookmarks, f, indent=2)
+        except IOError:
+            pass
     
-    def add_recent_dir(self, directory: str):
-        """Add directory to recent directories list."""
-        if directory in self.config["recent_dirs"]:
-            self.config["recent_dirs"].remove(directory)
-        self.config["recent_dirs"].insert(0, directory)
-        self.config["recent_dirs"] = self.config["recent_dirs"][:5]  # Keep only 5 recent
-        self.save_config()
-
-class YtDornDownloader:
-    """Core downloader class with advanced features."""
-    
-    def __init__(self, config: YtDornConfig):
-        self.config = config
-        self.interrupted = False
-        self.current_task = None
+    def select_directory(self) -> str:
+        """Interactive directory selection with navigation."""
+        console.print("\n📁 Directory Selection")
         
-        # Setup signal handlers for graceful interruption
+        while True:
+            # Show current directory and options
+            table = Table(show_header=False, box=None)
+            table.add_column("Option", style="cyan")
+            table.add_column("Path", style="white")
+            
+            # Current directory info
+            table.add_row("[.]", f"Current: {self.current_dir}")
+            table.add_row("", "")
+            
+            # Bookmarks
+            for i, (name, path) in enumerate(self.bookmarks.items(), 1):
+                if Path(path).exists():
+                    table.add_row(f"[{i}]", f"{name}: {path}")
+            
+            # Navigation options
+            table.add_row("", "")
+            table.add_row("[b]", "Browse/Navigate directories")
+            table.add_row("[c]", f"Create new folder in {self.current_dir}")
+            table.add_row("[a]", "Add current directory to bookmarks")
+            table.add_row("[p]", "Enter custom path")
+            table.add_row("[u]", "Use current directory")
+            
+            console.print(table)
+            
+            choice = Prompt.ask("Select option").strip()
+            
+            if choice == 'u':
+                selected_dir = str(self.current_dir)
+                break
+            elif choice == 'p':
+                custom_path = Prompt.ask("Enter path")
+                if Path(custom_path).exists() or Confirm.ask(f"Create {custom_path}?"):
+                    Path(custom_path).mkdir(parents=True, exist_ok=True)
+                    selected_dir = custom_path
+                    break
+            elif choice == 'b':
+                self._browse_directories()
+            elif choice == 'c':
+                folder_name = Prompt.ask("New folder name")
+                new_path = self.current_dir / folder_name
+                new_path.mkdir(exist_ok=True)
+                console.print(f"✓ Created {new_path}")
+                self.current_dir = new_path
+            elif choice == 'a':
+                name = Prompt.ask("Bookmark name")
+                self.bookmarks[name] = str(self.current_dir)
+                self._save_bookmarks()
+                console.print(f"✓ Added bookmark: {name}")
+            elif choice.isdigit():
+                idx = int(choice) - 1
+                bookmark_items = list(self.bookmarks.items())
+                if 0 <= idx < len(bookmark_items):
+                    selected_dir = bookmark_items[idx][1]
+                    break
+        
+        # Ensure directory exists
+        Path(selected_dir).mkdir(parents=True, exist_ok=True)
+        return selected_dir
+    
+    def _browse_directories(self):
+        """Browse directory structure interactively."""
+        try:
+            # List directories in current path
+            dirs = [d for d in self.current_dir.iterdir() if d.is_dir()]
+            dirs.sort()
+            
+            if not dirs:
+                console.print("No subdirectories found.")
+                return
+            
+            table = Table(show_header=False, box=None)
+            table.add_column("Option", style="cyan")
+            table.add_column("Directory", style="white")
+            
+            table.add_row("[..]", "Parent directory")
+            for i, directory in enumerate(dirs, 1):
+                table.add_row(f"[{i}]", directory.name)
+            
+            console.print(table)
+            
+            choice = Prompt.ask("Select directory or '..' for parent").strip()
+            
+            if choice == '..':
+                if self.current_dir.parent != self.current_dir:
+                    self.current_dir = self.current_dir.parent
+            elif choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(dirs):
+                    self.current_dir = dirs[idx]
+            
+        except Exception as e:
+            console.print(f"Error browsing directories: {e}")
+
+class MultiThreadDownloader:
+    """High-performance multi-threaded downloader."""
+    
+    def __init__(self, max_workers: int = 4):
+        self.max_workers = max_workers
+        self.download_queue: List[DownloadTask] = []
+        self.completed_tasks: List[DownloadTask] = []
+        self.failed_tasks: List[DownloadTask] = []
+        self.interrupted = False
+        self.active_downloads = 0
+        
+        # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
     
     def _signal_handler(self, signum, frame):
-        """Handle interruption signals gracefully."""
+        """Handle interruption signals."""
         self.interrupted = True
-        if self.current_task:
-            console.print("\n[yellow]⚠️  Download interrupted by user[/yellow]")
-            console.print("[dim]Cleaning up...[/dim]")
+        console.print("\n⚠️ Download interrupted. Finishing current downloads...")
     
-    def check_dependencies(self) -> Dict[str, bool]:
-        """Check if required dependencies are available."""
-        deps = {"yt-dlp": False, "ffmpeg": False}
-        
-        # Check yt-dlp
+    def add_task(self, task: DownloadTask):
+        """Add a download task to the queue."""
+        self.download_queue.append(task)
+    
+    def _download_single(self, task: DownloadTask, progress_callback=None) -> bool:
+        """Download a single video with progress tracking."""
         try:
-            import yt_dlp
-            deps["yt-dlp"] = True
-        except ImportError:
-            pass
-        
-        # Check FFmpeg
-        try:
-            subprocess.run(["ffmpeg", "-version"], 
-                         capture_output=True, check=True)
-            deps["ffmpeg"] = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-        
-        return deps
-    
-    def get_video_info(self, url: str) -> Optional[Dict]:
-        """Get detailed information about a video/playlist."""
-        try:
-            with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return info
-        except Exception as e:
-            console.print(f"[red]Error getting video info: {e}[/red]")
-            return None
-    
-    def format_video_info(self, info: Dict) -> Panel:
-        """Format video information for display."""
-        if info.get('_type') == 'playlist':
-            title = f"📁 {info.get('title', 'Unknown Playlist')}"
-            details = f"🎬 {info.get('playlist_count', 0)} videos\n"
-            details += f"👤 {info.get('uploader', 'Unknown')}\n"
-            if info.get('description'):
-                details += f"📝 {info['description'][:100]}..."
-        else:
-            title = f"🎥 {info.get('title', 'Unknown Video')}"
-            details = f"⏱️  {self._format_duration(info.get('duration', 0))}\n"
-            details += f"👤 {info.get('uploader', 'Unknown')}\n"
-            details += f"👀 {info.get('view_count', 0):,} views\n"
-            if info.get('description'):
-                details += f"📝 {info['description'][:100]}..."
-        
-        return Panel(details, title=title, expand=False)
-    
-    def _format_duration(self, seconds: int) -> str:
-        """Format duration in seconds to human readable format."""
-        if not seconds:
-            return "Unknown"
-        
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        seconds = seconds % 60
-        
-        if hours > 0:
-            return f"{hours}h {minutes}m {seconds}s"
-        elif minutes > 0:
-            return f"{minutes}m {seconds}s"
-        else:
-            return f"{seconds}s"
-    
-    def download_content(self, url: str, options: Dict) -> bool:
-        """Download content with specified options."""
-        try:
-            # Build yt-dlp options
-            ydl_opts = self._build_ydl_options(options)
-            
-            # Create progress hook
             def progress_hook(d):
                 if self.interrupted:
-                    raise KeyboardInterrupt("Download interrupted by user")
+                    raise KeyboardInterrupt("Download interrupted")
                 
                 if d['status'] == 'downloading':
-                    # Update progress display
-                    pass
+                    if 'total_bytes' in d and d['total_bytes']:
+                        task.progress = (d['downloaded_bytes'] / d['total_bytes']) * 100
+                    elif 'total_bytes_estimate' in d and d['total_bytes_estimate']:
+                        task.progress = (d['downloaded_bytes'] / d['total_bytes_estimate']) * 100
+                    
+                    if progress_callback:
+                        progress_callback(task)
+                
                 elif d['status'] == 'finished':
-                    console.print(f"[green]✅ Downloaded: {d['filename']}[/green]")
+                    task.progress = 100.0
+                    task.status = "completed"
             
-            ydl_opts['progress_hooks'] = [progress_hook]
+            # Build yt-dlp options
+            ydl_opts = {
+                'outtmpl': os.path.join(task.output_path, '%(title)s.%(ext)s'),
+                'format': self._get_format_string(task.options.get('format', 'best')),
+                'progress_hooks': [progress_hook],
+                'quiet': True,
+                'no_warnings': True,
+            }
+            
+            # Apply additional options
+            self._apply_download_options(ydl_opts, task.options)
             
             # Perform download
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                self.current_task = ydl
-                ydl.download([url])
-                
+                task.status = "downloading"
+                ydl.download([task.url])
+            
+            task.status = "completed"
             return True
             
         except KeyboardInterrupt:
-            console.print("[yellow]Download cancelled by user[/yellow]")
+            task.status = "cancelled"
+            task.error = "Cancelled by user"
             return False
         except Exception as e:
-            console.print(f"[red]Download failed: {e}[/red]")
+            task.status = "failed"
+            task.error = str(e)
             return False
-        finally:
-            self.current_task = None
     
-    def _build_ydl_options(self, options: Dict) -> Dict:
-        """Build yt-dlp options dictionary from user options."""
-        ydl_opts = {
-            'outtmpl': os.path.join(options['output_dir'], '%(title)s.%(ext)s'),
-            'format': self._get_format_string(options.get('format', 'best')),
-        }
-        
+    def _apply_download_options(self, ydl_opts: Dict, options: Dict):
+        """Apply download options to yt-dlp configuration."""
         # Audio extraction
         if options.get('extract_audio'):
             ydl_opts['format'] = 'bestaudio/best'
@@ -281,21 +323,15 @@ class YtDornDownloader:
         if options.get('subtitles'):
             ydl_opts['writesubtitles'] = True
             ydl_opts['writeautomaticsub'] = True
-            if options.get('embed_subtitles'):
-                ydl_opts['embedsubs'] = True
         
         # Thumbnails
         if options.get('thumbnails'):
             ydl_opts['writethumbnail'] = True
-            if options.get('embed_thumbnails'):
-                ydl_opts['embedthumbnail'] = True
         
         # Metadata
         if options.get('metadata'):
             ydl_opts['writeinfojson'] = True
             ydl_opts['writedescription'] = True
-        
-        return ydl_opts
     
     def _get_format_string(self, quality: str) -> str:
         """Convert quality selection to yt-dlp format string."""
@@ -307,250 +343,295 @@ class YtDornDownloader:
             '360p': 'best[height<=360][ext=mp4]/best[height<=360]',
         }
         return quality_map.get(quality, quality)
+    
+    def download_all(self):
+        """Download all queued tasks with multi-threading."""
+        if not self.download_queue:
+            console.print("No downloads queued.")
+            return
+        
+        console.print(f"Starting {len(self.download_queue)} downloads with {self.max_workers} threads...")
+        
+        with Progress(console=console) as progress:
+            # Create progress tasks
+            progress_tasks = {}
+            for task in self.download_queue:
+                progress_id = progress.add_task(f"[cyan]{task.title[:50]}...", total=100)
+                progress_tasks[task] = progress_id
+            
+            def update_progress(task: DownloadTask):
+                if task in progress_tasks:
+                    progress.update(progress_tasks[task], completed=task.progress)
+            
+            # Execute downloads with thread pool
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                future_to_task = {
+                    executor.submit(self._download_single, task, update_progress): task 
+                    for task in self.download_queue
+                }
+                
+                for future in concurrent.futures.as_completed(future_to_task):
+                    task = future_to_task[future]
+                    success = future.result()
+                    
+                    if success:
+                        self.completed_tasks.append(task)
+                        progress.update(progress_tasks[task], completed=100)
+                    else:
+                        self.failed_tasks.append(task)
+                        progress.update(progress_tasks[task], completed=100, 
+                                      description=f"[red]Failed: {task.title[:40]}...")
+                    
+                    if self.interrupted:
+                        break
+        
+        # Print summary
+        console.print(f"\n✅ Completed: {len(self.completed_tasks)}")
+        console.print(f"❌ Failed: {len(self.failed_tasks)}")
+        
+        if self.failed_tasks:
+            console.print("\nFailed downloads:")
+            for task in self.failed_tasks:
+                console.print(f"  • {task.title}: {task.error}")
 
-class YtDornInterface:
-    """Rich terminal interface for YtDorn."""
+class EnhancedYtDorn:
+    """Main application class with enhanced features."""
     
     def __init__(self):
-        self.config = YtDornConfig()
-        self.downloader = YtDornDownloader(self.config)
+        self.navigator = DirectoryNavigator()
+        self.downloader = MultiThreadDownloader()
+        self.config = self._load_config()
     
-    def show_banner(self):
-        """Display the YtDorn banner."""
-        banner = """
-╭─────────────────────────────────────────────╮
-│  ██╗  ██╗████████╗██████╗  ██████╗ ██████╗ │
-│  ╚██╗ ██╔╝╚══██╔══╝██╔══██╗██╔═══██╗██╔══██╗│
-│   ╚████╔╝   ██║   ██║  ██║██║   ██║██████╔╝│
-│    ╚██╔╝    ██║   ██║  ██║██║   ██║██╔══██╗│
-│     ██║     ██║   ██████╔╝╚██████╔╝██║  ██║│
-│     ╚═╝     ╚═╝   ╚═════╝  ╚═════╝ ╚═╝  ╚═╝│
-╰─────────────────────────────────────────────╯
-"""
-        console.print(Panel(banner, style="bold blue"))
-        console.print(Align.center("[bold]YtDorn v0.1.2 by 0xb0rn3[/bold]"))
-        console.print(Align.center("Super Powerful YouTube Downloader"))
-        console.print(Align.center("https://github.com/0xb0rn3/ytdorn"))
-        console.print("═" * 50)
-    
-    def check_system_status(self):
-        """Check and display system status."""
-        deps = self.downloader.check_dependencies()
+    def _load_config(self) -> Dict:
+        """Load application configuration."""
+        config_path = Path.home() / ".ytdorn_config.json"
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
         
-        if deps["yt-dlp"] and deps["ffmpeg"]:
-            console.print("[green]✓ yt-dlp and FFmpeg found.[/green]")
-            console.print("[green]🚀 System ready![/green]")
-        elif deps["yt-dlp"]:
-            console.print("[green]✓ yt-dlp found.[/green]")
-            console.print("[yellow]⚠️  FFmpeg not found. Audio conversion may be limited.[/yellow]")
+        return {
+            "default_quality": "1080p",
+            "default_threads": 4,
+            "recent_downloads": []
+        }
+    
+    def _save_config(self):
+        """Save application configuration."""
+        config_path = Path.home() / ".ytdorn_config.json"
+        try:
+            with open(config_path, 'w') as f:
+                json.dump(self.config, f, indent=2)
+        except IOError:
+            pass
+    
+    def get_video_info(self, url: str) -> Optional[Dict]:
+        """Get detailed video/playlist/channel information."""
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,  # Get full info
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return info
+        except Exception as e:
+            console.print(f"Error getting info: {e}")
+            return None
+    
+    def extract_channel_videos(self, channel_url: str) -> List[Dict]:
+        """Extract all videos from a YouTube channel."""
+        try:
+            # Handle different channel URL formats
+            if '/channel/' not in channel_url and '/c/' not in channel_url and '/@' not in channel_url:
+                if 'youtube.com/user/' not in channel_url:
+                    channel_url = f"https://www.youtube.com/c/{channel_url}"
+            
+            ydl_opts = {
+                'quiet': True,
+                'extract_flat': True,  # Only get video URLs, not full info
+                'playlistend': None,   # Get all videos
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(channel_url, download=False)
+                
+                if info and 'entries' in info:
+                    return list(info['entries'])
+                else:
+                    return []
+                    
+        except Exception as e:
+            console.print(f"Error extracting channel videos: {e}")
+            return []
+    
+    def process_url(self, url: str, options: Dict) -> List[DownloadTask]:
+        """Process URL and create download tasks."""
+        tasks = []
+        
+        console.print("🔍 Analyzing URL...")
+        info = self.get_video_info(url)
+        
+        if not info:
+            console.print("❌ Could not extract information from URL")
+            return tasks
+        
+        output_dir = options['output_dir']
+        
+        if info.get('_type') == 'playlist':
+            # Playlist processing
+            console.print(f"📁 Found playlist: {info.get('title', 'Unknown')}")
+            console.print(f"🎬 {len(info.get('entries', []))} videos")
+            
+            if not Confirm.ask("Download entire playlist?"):
+                return tasks
+            
+            for entry in info.get('entries', []):
+                if entry:
+                    task = DownloadTask(
+                        url=entry.get('url', entry.get('webpage_url', '')),
+                        title=entry.get('title', 'Unknown'),
+                        output_path=output_dir,
+                        options=options.copy()
+                    )
+                    tasks.append(task)
+        
+        elif 'channel' in url.lower() or '/c/' in url or '/@' in url:
+            # Channel processing
+            console.print("📺 Extracting channel videos...")
+            videos = self.extract_channel_videos(url)
+            
+            if videos:
+                console.print(f"🎬 Found {len(videos)} videos in channel")
+                
+                if Confirm.ask("Download all channel videos?"):
+                    for video in videos:
+                        if video:
+                            task = DownloadTask(
+                                url=f"https://www.youtube.com/watch?v={video.get('id', '')}",
+                                title=video.get('title', 'Unknown'),
+                                output_path=output_dir,
+                                options=options.copy()
+                            )
+                            tasks.append(task)
+        
         else:
-            console.print("[red]❌ yt-dlp not found. Installing...[/red]")
-            return False
+            # Single video
+            task = DownloadTask(
+                url=url,
+                title=info.get('title', 'Unknown'),
+                output_path=output_dir,
+                options=options.copy()
+            )
+            tasks.append(task)
         
-        console.print("═" * 60)
-        return True
-    
-    def show_main_menu(self) -> str:
-        """Display main menu and get user choice."""
-        menu_table = Table(show_header=False, box=None, padding=(0, 1))
-        menu_table.add_column("Option", style="bold cyan")
-        menu_table.add_column("Description", style="white")
-        
-        menu_table.add_row("[s]", "🎥 Single Video/Playlist Item")
-        menu_table.add_row("", "[dim]Download specific video or item(s) from a playlist[/dim]")
-        menu_table.add_row("[p]", "🎬 Full Playlist/Channel")
-        menu_table.add_row("", "[dim]Download entire playlist or select a playlist from a channel[/dim]")
-        menu_table.add_row("[i]", "📊 Content Info")
-        menu_table.add_row("", "[dim]Get detailed info for a URL (video, playlist, channel)[/dim]")
-        menu_table.add_row("[q]", "🚪 Quit")
-        menu_table.add_row("", "[dim]Exit YtDorn[/dim]")
-        
-        menu_panel = Panel(menu_table, title="─ Main Menu ─", expand=False)
-        console.print(menu_panel)
-        
-        return Prompt.ask("❯ Select option", choices=["s", "p", "i", "q"], default="s")
-    
-    def get_url_input(self) -> str:
-        """Get URL input from user."""
-        while True:
-            url = Prompt.ask("\n🔗 Enter YouTube URL")
-            if self._is_valid_youtube_url(url):
-                return url
-            console.print("[red]❌ Invalid YouTube URL. Please try again.[/red]")
-    
-    def _is_valid_youtube_url(self, url: str) -> bool:
-        """Validate YouTube URL."""
-        parsed = urlparse(url)
-        youtube_domains = ['youtube.com', 'www.youtube.com', 'youtu.be', 'm.youtube.com']
-        return parsed.netloc in youtube_domains
+        return tasks
     
     def get_download_options(self) -> Dict:
-        """Get download options from user."""
+        """Get download options from user with minimal interface."""
         options = {}
         
-        # Quality selection
-        console.print("\n📺 Quality Selection:")
+        # Quick options
+        console.print("\n⚙️ Download Options")
+        
+        # Quality
         quality_choices = ["best", "1080p", "720p", "480p", "360p"]
-        options['format'] = Prompt.ask("Select quality", choices=quality_choices, default="best")
+        options['format'] = Prompt.ask("Quality", 
+                                     choices=quality_choices, 
+                                     default=self.config.get('default_quality', 'best'))
         
         # Audio extraction
-        options['extract_audio'] = Confirm.ask("🎵 Extract audio only?", default=False)
+        options['extract_audio'] = Confirm.ask("Audio only?", default=False)
         if options['extract_audio']:
-            audio_formats = ["mp3", "m4a", "opus"]
-            options['audio_format'] = Prompt.ask("Audio format", choices=audio_formats, default="mp3")
+            options['audio_format'] = Prompt.ask("Audio format", 
+                                               choices=["mp3", "m4a", "opus"], 
+                                               default="mp3")
         
-        # Output directory
-        options['output_dir'] = self._get_output_directory()
+        # Directory selection
+        options['output_dir'] = self.navigator.select_directory()
         
-        # Additional options
-        console.print("\n⚙️  Additional Options:")
-        options['subtitles'] = Confirm.ask("📝 Download subtitles?", default=False)
-        options['thumbnails'] = Confirm.ask("🖼️  Download thumbnails?", default=False)
-        options['metadata'] = Confirm.ask("📊 Save metadata?", default=False)
+        # Additional options (quick)
+        console.print("\nAdditional options (y/n):")
+        options['subtitles'] = Confirm.ask("Subtitles?", default=False)
+        options['thumbnails'] = Confirm.ask("Thumbnails?", default=False)
+        options['metadata'] = Confirm.ask("Metadata?", default=False)
         
         return options
     
-    def _get_output_directory(self) -> str:
-        """Get output directory from user."""
-        console.print("\n📁 Output Directory:")
-        
-        # Show recent directories
-        recent_dirs = self.config.config.get("recent_dirs", [])
-        if recent_dirs:
-            console.print("Recent directories:")
-            for i, directory in enumerate(recent_dirs[:3], 1):
-                console.print(f"  [{i}] {directory}")
-            
-            choice = Prompt.ask("Select recent directory or enter new path", default="new")
-            if choice.isdigit() and 1 <= int(choice) <= len(recent_dirs):
-                return recent_dirs[int(choice) - 1]
-        
-        # Get new directory
-        default_dir = os.path.join(os.path.expanduser("~"), "Downloads", "YtDorn")
-        directory = Prompt.ask("Enter output directory", default=default_dir)
-        
-        # Create directory if it doesn't exist
-        os.makedirs(directory, exist_ok=True)
-        self.config.add_recent_dir(directory)
-        
-        return directory
-    
-    def show_download_summary(self, url: str, info: Dict, options: Dict):
-        """Show download summary before starting."""
-        summary_table = Table(show_header=False, box=None)
-        summary_table.add_column("Setting", style="bold")
-        summary_table.add_column("Value", style="cyan")
-        
-        summary_table.add_row("URL:", url[:50] + "..." if len(url) > 50 else url)
-        summary_table.add_row("Title:", info.get('title', 'Unknown')[:50])
-        summary_table.add_row("Quality:", options['format'])
-        summary_table.add_row("Audio Only:", "Yes" if options['extract_audio'] else "No")
-        summary_table.add_row("Output:", options['output_dir'])
-        summary_table.add_row("Subtitles:", "Yes" if options['subtitles'] else "No")
-        summary_table.add_row("Thumbnails:", "Yes" if options['thumbnails'] else "No")
-        
-        console.print(Panel(summary_table, title="📋 Download Summary", expand=False))
-        
-        return Confirm.ask("\n🚀 Start download?", default=True)
-    
-    def run_interactive_mode(self):
-        """Run the interactive mode."""
-        self.show_banner()
-        
-        if not self.check_system_status():
-            return
+    def run_interactive(self):
+        """Run interactive mode with minimal interface."""
+        console.print("🚀 Enhanced YtDorn - Fast YouTube Downloader")
+        console.print("=" * 50)
         
         while True:
             try:
-                choice = self.show_main_menu()
+                # Simple menu
+                console.print("\nOptions: [d]ownload [i]nfo [q]uit")
+                choice = Prompt.ask("Select", choices=["d", "i", "q"], default="d")
                 
                 if choice == 'q':
-                    console.print("\n👋 Thanks for using YtDorn!")
                     break
                 
-                elif choice == 'i':
+                # Get URL
+                url = Prompt.ask("\n🔗 YouTube URL")
+                
+                if choice == 'i':
                     # Info mode
-                    url = self.get_url_input()
-                    with console.status("🔍 Fetching video information..."):
-                        info = self.downloader.get_video_info(url)
-                    
+                    info = self.get_video_info(url)
                     if info:
-                        console.print(self.downloader.format_video_info(info))
-                    
-                elif choice in ['s', 'p']:
+                        console.print(f"\n📺 Title: {info.get('title', 'Unknown')}")
+                        console.print(f"👤 Channel: {info.get('uploader', 'Unknown')}")
+                        if info.get('duration'):
+                            console.print(f"⏱️ Duration: {info['duration']}s")
+                        if info.get('view_count'):
+                            console.print(f"👀 Views: {info['view_count']:,}")
+                
+                elif choice == 'd':
                     # Download mode
-                    url = self.get_url_input()
-                    
-                    # Get video info
-                    with console.status("🔍 Analyzing content..."):
-                        info = self.downloader.get_video_info(url)
-                    
-                    if not info:
-                        console.print("[red]❌ Could not fetch video information[/red]")
-                        continue
-                    
-                    # Show video info
-                    console.print(self.downloader.format_video_info(info))
-                    
-                    # Get download options
                     options = self.get_download_options()
                     
-                    # Show summary and confirm
-                    if self.show_download_summary(url, info, options):
-                        with Progress(
-                            SpinnerColumn(),
-                            TextColumn("[progress.description]{task.description}"),
-                            BarColumn(),
-                            TaskProgressColumn(),
-                            TimeRemainingColumn(),
-                            console=console
-                        ) as progress:
-                            task = progress.add_task("Downloading...", total=100)
-                            success = self.downloader.download_content(url, options)
-                            progress.update(task, completed=100)
+                    # Process URL and create tasks
+                    tasks = self.process_url(url, options)
+                    
+                    if tasks:
+                        # Add tasks to downloader
+                        for task in tasks:
+                            self.downloader.add_task(task)
                         
-                        if success:
-                            console.print("[green]✅ Download completed successfully![/green]")
-                        else:
-                            console.print("[red]❌ Download failed[/red]")
-                
-                console.print("\n" + "═" * 60)
+                        # Confirm and start download
+                        console.print(f"\n📦 {len(tasks)} items queued for download")
+                        if Confirm.ask("Start download?", default=True):
+                            self.downloader.download_all()
+                        
+                        # Clear completed tasks
+                        self.downloader.download_queue.clear()
+                        self.downloader.completed_tasks.clear()
+                        self.downloader.failed_tasks.clear()
                 
             except KeyboardInterrupt:
-                console.print("\n[yellow]Operation cancelled by user[/yellow]")
+                console.print("\n👋 Goodbye!")
                 break
             except Exception as e:
-                console.print(f"[red]Unexpected error: {e}[/red]")
+                console.print(f"❌ Error: {e}")
 
-def create_cli_parser() -> argparse.ArgumentParser:
-    """Create command line argument parser."""
-    parser = argparse.ArgumentParser(
-        description="YtDorn - Super Powerful YouTube Downloader",
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+def create_cli_parser():
+    """Create CLI argument parser."""
+    parser = argparse.ArgumentParser(description="Enhanced YtDorn - Fast YouTube Downloader")
     
-    parser.add_argument('-u', '--url', help='YouTube URL to download')
-    parser.add_argument('-f', '--format', default='best', 
-                       choices=['best', '1080p', '720p', '480p', '360p'],
-                       help='Video quality/format')
+    parser.add_argument('url', nargs='?', help='YouTube URL')
+    parser.add_argument('-f', '--format', default='best', help='Video quality')
     parser.add_argument('-o', '--output', help='Output directory')
-    parser.add_argument('--extract-audio', action='store_true',
-                       help='Extract audio only')
-    parser.add_argument('--audio-format', default='mp3',
-                       choices=['mp3', 'm4a', 'opus'],
-                       help='Audio format for extraction')
-    parser.add_argument('--subtitles', action='store_true',
-                       help='Download subtitles')
-    parser.add_argument('--thumbnails', action='store_true',
-                       help='Download thumbnails')
-    parser.add_argument('--metadata', action='store_true',
-                       help='Save metadata')
-    parser.add_argument('--batch', help='Batch download from file')
-    parser.add_argument('--preset', help='Use saved preset')
-    parser.add_argument('--info', action='store_true',
-                       help='Show video information only')
-    parser.add_argument('--list-presets', action='store_true',
-                       help='List available presets')
+    parser.add_argument('-t', '--threads', type=int, default=4, help='Number of download threads')
+    parser.add_argument('--audio', action='store_true', help='Extract audio only')
+    parser.add_argument('--audio-format', default='mp3', help='Audio format')
+    parser.add_argument('--subs', action='store_true', help='Download subtitles')
+    parser.add_argument('--thumbs', action='store_true', help='Download thumbnails')
+    parser.add_argument('--meta', action='store_true', help='Save metadata')
+    parser.add_argument('--info', action='store_true', help='Show info only')
     
     return parser
 
@@ -559,69 +640,42 @@ def main():
     parser = create_cli_parser()
     args = parser.parse_args()
     
-    interface = YtDornInterface()
-    
-    # Handle CLI arguments
-    if args.list_presets:
-        console.print("📋 Available Presets:")
-        for name, preset in interface.config.config.get('presets', {}).items():
-            console.print(f"  • {name}: {preset.get('description', 'No description')}")
-        return
+    app = EnhancedYtDorn()
     
     if args.url:
         # CLI mode
         options = {
             'format': args.format,
-            'extract_audio': args.extract_audio,
+            'extract_audio': args.audio,
             'audio_format': args.audio_format,
-            'subtitles': args.subtitles,
-            'thumbnails': args.thumbnails,
-            'metadata': args.metadata,
+            'subtitles': args.subs,
+            'thumbnails': args.thumbs,
+            'metadata': args.meta,
             'output_dir': args.output or os.path.join(os.path.expanduser("~"), "Downloads", "YtDorn")
         }
-        
-        # Apply preset if specified
-        if args.preset:
-            preset = interface.config.config.get('presets', {}).get(args.preset)
-            if preset:
-                options.update(preset)
-            else:
-                console.print(f"[red]Preset '{args.preset}' not found[/red]")
-                return
         
         os.makedirs(options['output_dir'], exist_ok=True)
         
         if args.info:
-            # Info mode
-            info = interface.downloader.get_video_info(args.url)
+            info = app.get_video_info(args.url)
             if info:
-                console.print(interface.downloader.format_video_info(info))
+                console.print(f"Title: {info.get('title', 'Unknown')}")
+                console.print(f"Channel: {info.get('uploader', 'Unknown')}")
+                if info.get('duration'):
+                    console.print(f"Duration: {info['duration']}s")
         else:
-            # Download mode
-            success = interface.downloader.download_content(args.url, options)
-            if success:
-                console.print("[green]✅ Download completed![/green]")
-            else:
-                console.print("[red]❌ Download failed[/red]")
-    
-    elif args.batch:
-        # Batch mode
-        try:
-            with open(args.batch, 'r') as f:
-                urls = [line.strip() for line in f if line.strip()]
+            # Set thread count
+            app.downloader.max_workers = args.threads
             
-            console.print(f"📥 Processing {len(urls)} URLs from batch file...")
-            
-            for i, url in enumerate(urls, 1):
-                console.print(f"\n[{i}/{len(urls)}] Processing: {url}")
-                # Process each URL with same logic as single URL
-                
-        except FileNotFoundError:
-            console.print(f"[red]Batch file '{args.batch}' not found[/red]")
-    
+            # Process and download
+            tasks = app.process_url(args.url, options)
+            if tasks:
+                for task in tasks:
+                    app.downloader.add_task(task)
+                app.downloader.download_all()
     else:
         # Interactive mode
-        interface.run_interactive_mode()
+        app.run_interactive()
 
 if __name__ == "__main__":
     main()
