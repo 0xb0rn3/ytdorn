@@ -245,7 +245,7 @@ class ModernUI:
         print(Colors.gradient_text(banner_text, (64, 224, 255), (255, 100, 255)))
         print(f"\n{Colors.PRIMARY}{Colors.BOLD}YtDorn v0.1.2{Colors.RESET} {Colors.MUTED}by 0xb0rn3{Colors.RESET}")
         print(f"{Colors.INFO}Super Powerful YouTube Downloader{Colors.RESET}")
-        print(f"{Colors.MUTED}https://github.com/0xb0rn3/YtDorn (Example URL){Colors.RESET}") # Example URL
+        print(f"{Colors.MUTED}https://github.com/0xb0rn3/YtDorn {Colors.RESET}") # Example URL
         print(Colors.gradient_text('═' * 50, (64, 224, 255), (255, 100, 255)))
 
     @staticmethod
