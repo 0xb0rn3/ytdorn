@@ -1,579 +1,946 @@
 #!/usr/bin/env python3
 """
-YtDorn - Universal Multi-Downloader Tool
-Version: 0.1.3
-Supports: YouTube (Videos, Playlists, Channels), Torrents (via libtorrent), Generic URLs
-Features: Auto-dependency installation, aria2c for speed, basic config management.
+YtDorn v0.1.2 - Super Powerful YouTube Downloader
+Created by: 0xb0rn3
+Advanced CLI tool for comprehensive YouTube content downloading with modern UI
 """
 
-import os
 import sys
+import platform
 import subprocess
+import os
 import json
-import time
+import asyncio
+import concurrent.futures
+from typing import Dict, Any, Optional, List, Tuple
 import shutil
-import importlib
+from datetime import datetime
+import time
+import threading
 from pathlib import Path
-from typing import Optional, Dict, List, Any
-import shlex # For safely formatting command strings for display
+import signal
+import re
+import argparse
+from urllib.parse import urlparse, parse_qs
+import logging
 
-# Global flags, will be set after checking/installing dependencies
-PSUTIL_AVAILABLE = False
-LIBTORRENT_AVAILABLE = False
-LT_MODULE = None # To store the imported libtorrent module
+class Colors:
+"""Enhanced color management with modern terminal styling"""
+# Core colors
+PRIMARY = '\033[38;2;64;224;255m'     # Bright cyan
+SECONDARY = '\033[38;2;255;100;255m'   # Bright magenta
+SUCCESS = '\033[38;2;0;255;127m'       # Bright green
+WARNING = '\033[38;2;255;191;0m'       # Bright yellow
+ERROR = '\033[38;2;255;69;58m'         # Bright red
+INFO = '\033[38;2;175;175;255m'        # Light blue
+MUTED = '\033[38;2;128;128;128m'       # Gray
 
-class YtDorn:
-    def __init__(self):
-        self.version = "0.1.3"
-        self._check_and_install_dependencies() # Critical first step
+# Text styles
+BOLD = '\033[1m'
+DIM = '\033[2m'
+ITALIC = '\033[3m'
+UNDERLINE = '\033[4m'
+RESET = '\033[0m'
 
-        self.current_dir = Path.cwd()
-        self.download_dir = self.current_dir / "YtDorn_Downloads_v013" # Default, version specific
-        self.config_dir = Path.home() / ".ytdorn"
-        self.config_file = self.config_dir / "config.json"
-        
-        self.ensure_config_dir()
-        self.config = self.load_config()
-        
-        self.download_dir = Path(self.config.get('download_dir', str(self.download_dir)))
-        self.ensure_download_dir()
+# Special effects
+GLOW = '\033[5m'
+REVERSE = '\033[7m'
 
-        self.torrent_session: Optional[Any] = None
-        self.active_torrent_handles: Dict[str, Any] = {}
+@staticmethod
+def rgb(r: int, g: int, b: int) -> str:
+return f'\033[38;2;{r};{g};{b}m'
 
-        self.aria2c_path = shutil.which("aria2c")
-        
-        if LIBTORRENT_AVAILABLE:
-            self.setup_torrent_session_on_init()
+@staticmethod
+def gradient_text(text: str, color1: Tuple[int, int, int], color2: Tuple[int, int, int]) -> str:
+"""Create smooth color gradient across text"""
+if not text.strip():
+return text
 
-    def _install_package(self, package_name: str, import_name: Optional[str] = None) -> bool:
-        if import_name is None:
-            import_name = package_name
-        
-        print(f"↪️ Attempting to install '{package_name}'...")
-        pip_command = [sys.executable, "-m", "pip", "install", package_name]
-        
-        # Add --break-system-packages for Linux environments that require it
-        # This is a common requirement on newer Debian/Ubuntu systems for global pip installs
-        if sys.platform.startswith("linux"):
-            # A more robust check would be to see if pip is externally managed.
-            # For now, broadly applying for Linux as requested.
-            pip_command.append("--break-system-packages")
-            
-        try:
-            subprocess.check_call(pip_command)
-            print(f"✅ Successfully installed '{package_name}'.")
-            importlib.import_module(import_name) # Verify import
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Failed to install '{package_name}' using pip. Return code: {e.returncode}")
-            print(f"   Command: {' '.join(pip_command)}")
-            # Attempt to decode stderr if it's bytes
-            stderr_output = e.stderr
-            if isinstance(stderr_output, bytes):
-                stderr_output = stderr_output.decode(errors='replace')
-            print(f"   Error output: {stderr_output}")
-            print(f"   You may need to install it manually or ensure pip has necessary permissions.")
-        except ImportError:
-            print(f"❌ Installed '{package_name}', but failed to import '{import_name}'.")
-        except Exception as e:
-            print(f"❌ An unexpected error occurred during installation of '{package_name}': {e}")
-        return False
+result = ""
+text_length = len([c for c in text if c.strip()])
+char_index = 0
 
-    def _check_and_install_dependencies(self):
-        global PSUTIL_AVAILABLE, LIBTORRENT_AVAILABLE, LT_MODULE
-        
-        dependencies = {
-            "yt-dlp": ("yt_dlp", True, "YouTube and generic URL downloads"),
-            "psutil": ("psutil", False, "Detailed system/storage information"),
-            "python-libtorrent": ("libtorrent", False, "Torrent downloading features"),
-        }
-        
-        missing_deps_to_install = []
-        print("--- Initial Dependency Check (YtDorn v0.1.3) ---")
+for char in text:
+if char.strip():
+progress = char_index / max(text_length - 1, 1)
+r = int(color1[0] + (color2[0] - color1[0]) * progress)
+g = int(color1[1] + (color2[1] - color1[1]) * progress)
+b = int(color1[2] + (color2[2] - color1[2]) * progress)
+result += Colors.rgb(r, g, b) + char
+char_index += 1
+else:
+result += char
+return result + Colors.RESET
 
-        for pip_name, (import_name, is_critical, purpose) in dependencies.items():
-            try:
-                module = importlib.import_module(import_name)
-                print(f"✔️ {import_name}: Found")
-                if import_name == "psutil": PSUTIL_AVAILABLE = True
-                if import_name == "libtorrent":
-                    LIBTORRENT_AVAILABLE = True
-                    LT_MODULE = module
-            except ImportError:
-                print(f"⚠️ {import_name}: Not found ({purpose})")
-                missing_deps_to_install.append({'pip_name': pip_name, 'import_name': import_name, 'is_critical': is_critical})
+class ModernSpinner:
+"""Advanced spinner with multiple animation styles"""
 
-        if missing_deps_to_install:
-            print("\n-------------------------------------------------------------")
-            print("The following dependencies are missing or not found:")
-            for dep in missing_deps_to_install:
-                critical_status = "(Critical!)" if dep['is_critical'] else "(Optional)"
-                print(f"  - {dep['pip_name']} (module: {dep['import_name']}) {critical_status}")
-            print("-------------------------------------------------------------")
-            
-            try:
-                choice = input("Attempt automatic installation using pip? (y/N): ").strip().lower()
-            except EOFError: choice = 'n'; print("Non-interactive environment: Skipping auto-install.")
+STYLES = {
+'dots': ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
+'pulse': ['●', '○', '◍', '◌'],
+'wave': ['▁', '▃', '▄', '▅', '▆', '▇', '█', '▇', '▆', '▅', '▄', '▃'],
+'arrow': ['←', '↖', '↑', '↗', '→', '↘', '↓', '↙'],
+}
 
-            if choice == 'y':
-                successfully_installed_all_critical = True
-                for dep in missing_deps_to_install:
-                    if self._install_package(dep['pip_name'], dep['import_name']):
-                        if dep['import_name'] == "psutil": PSUTIL_AVAILABLE = True
-                        if dep['import_name'] == "libtorrent":
-                            try:
-                                LT_MODULE = importlib.import_module(dep['import_name'])
-                                LIBTORRENT_AVAILABLE = True
-                            except ImportError:
-                                LIBTORRENT_AVAILABLE = False
-                                if dep['is_critical']: successfully_installed_all_critical = False
-                    elif dep['is_critical']:
-                        successfully_installed_all_critical = False
-                
-                if not successfully_installed_all_critical:
-                    print("\n❌ Not all critical dependencies could be installed. Key features might not work.")
-                    # Specific check for yt-dlp as it's most critical
-                    try: importlib.import_module("yt_dlp")
-                    except ImportError:
-                        print("CRITICAL FAILURE: yt-dlp is still missing after install attempt.")
-                        if input("Exit application due to missing yt-dlp? (Y/n): ").strip().lower() != 'n':
-                             sys.exit("Exiting: yt-dlp is essential and could not be installed.")
-            else:
-                print("Skipping automatic installation.")
-                try: importlib.import_module("yt_dlp")
-                except ImportError:
-                    print("CRITICAL: yt-dlp not found and installation skipped. Most features will fail. Exiting.")
-                    sys.exit(1)
-        
-        print("--- Dependency Check Complete ---\n")
-        time.sleep(0.5)
+def __init__(self, style='dots'):
+self.frames = self.STYLES.get(style, self.STYLES['dots'])
+self.stop_event = threading.Event()
+self.thread = None
+self.message = ""
 
-    def ensure_config_dir(self):
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+def animate(self):
+"""Run the spinner animation"""
+frame_index = 0
+while not self.stop_event.is_set():
+frame = self.frames[frame_index % len(self.frames)]
+sys.stdout.write(f'\r{Colors.PRIMARY}{frame}{Colors.RESET} {self.message}')
+sys.stdout.flush()
+time.sleep(0.1)
+frame_index += 1
 
-    def load_config(self) -> Dict:
-        default_config = {
-            'download_dir': str(self.download_dir),
-            'favorite_dirs': [],
-            'default_yt_quality': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'yt_output_template_video': "%(uploader)s/%(title)s [%(id)s].%(ext)s",
-            'yt_output_template_playlist': "%(uploader)s/%(playlist_title)s/%(playlist_index)s - %(title)s [%(id)s].%(ext)s",
-            'yt_output_template_channel': "%(uploader)s/%(channel)s/%(playlist_title,NA)s/%(title)s [%(id)s].%(ext)s",
-            'torrent_save_path': str(self.download_dir / "Torrents"),
-            'torrent_port_min': 6881,
-            'torrent_port_max': 6891,
-            'use_aria2c_if_available': True,
-        }
-        if self.config_file.exists():
-            try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    saved_config = json.load(f)
-                merged_config = default_config.copy()
-                merged_config.update(saved_config)
-                return merged_config
-            except (json.JSONDecodeError, KeyError) as e:
-                print(f"⚠️ Config file '{self.config_file}' corrupted ({e}). Backing up and using defaults.")
-                try: shutil.move(str(self.config_file), str(self.config_file) + ".corrupted")
-                except Exception as move_err: print(f"Could not backup corrupted config: {move_err}")
-                # Fall through to create new default config
-            except Exception as e: # Catch other potential errors like permission issues
-                 print(f"⚠️ Error loading config '{self.config_file}': {e}. Using defaults.")
+def start(self, message: str):
+"""Start spinner with message"""
+self.message = message
+self.stop_event.clear()
+self.thread = threading.Thread(target=self.animate, daemon=True)
+self.thread.start()
 
+def stop(self, final_message: str = None):
+"""Stop spinner and optionally show final message"""
+self.stop_event.set()
+if self.thread:
+self.thread.join()
+sys.stdout.write('\r\033[K')
+if final_message:
+print(final_message)
 
-        # Create new default config if file doesn't exist or was corrupted
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(default_config, f, indent=2)
-            print(f"✅ Default configuration file created/recreated at '{self.config_file}'.")
-        except Exception as save_e:
-            print(f"❌ CRITICAL: Could not write default config to '{self.config_file}': {save_e}")
-        return default_config
+class AdvancedProgressBar:
+"""Modern progress bar with detailed statistics"""
 
-    def save_config(self):
-        self.config['download_dir'] = str(self.download_dir)
-        self.config['torrent_save_path'] = str(Path(self.config.get('torrent_save_path', self.download_dir / "Torrents")))
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=2)
-        except Exception as e: print(f"⚠️ Could not save config: {e}")
+def __init__(self, total: int, description: str = "", width: int = 40):
+self.total = total
+self.description = description
+self.width = width
+self.start_time = time.time()
+self.current = 0
+self.speed_samples = []
+self.last_update = time.time()
 
-    def ensure_download_dir(self):
-        try:
-            self.download_dir.mkdir(parents=True, exist_ok=True)
-            Path(self.config.get('torrent_save_path', self.download_dir / "Torrents")).mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            print(f"❌ CRITICAL: Could not create download directories: {e}. Please check permissions.")
-            sys.exit("Directory creation failed.")
+def update(self, current: int, extra_info: str = "") -> str:
+"""Update progress with enhanced statistics"""
+self.current = current
+now = time.time()
 
+# Calculate speed with smoothing
+if now - self.last_update > 0.5:  # Update speed every 0.5 seconds
+if self.speed_samples:
+speed = (current - self.speed_samples[-1][1]) / (now - self.speed_samples[-1][0])
+else:
+speed = current / (now - self.start_time) if now > self.start_time else 0
 
-    def clear_screen(self):
-        os.system('cls' if os.name == 'nt' else 'clear')
+self.speed_samples.append((now, current))
+if len(self.speed_samples) > 10:  # Keep last 10 samples
+self.speed_samples.pop(0)
+self.last_update = now
 
-    def show_header(self, title=""):
-        self.clear_screen()
-        print("=" * 70)
-        print(f"🎬 YtDorn Universal Downloader v{self.version} 🎬")
-        if title: print(f"--- {title} ---")
-        print("=" * 70)
-        print(f"💾 Default Download Location: {self.download_dir}")
-        if self.aria2c_path and self.config.get('use_aria2c_if_available'):
-            print(f"🚀 aria2c detected. Using for faster YouTube/HTTP downloads (if enabled).")
-        elif not self.aria2c_path and self.config.get('use_aria2c_if_available'):
-            print(f"💨 aria2c not found. Install for potentially faster YouTube/HTTP downloads.")
-        print("-" * 70)
-        
-    def main_loop(self):
-        while True:
-            self.show_header("Main Menu")
-            print("\nChoose Download Type or Action:")
-            print("  [YouTube Downloader]")
-            print("    1. Download Single YouTube Video")
-            print("    2. Download YouTube Playlist")
-            print("    3. Download Entire YouTube Channel")
-            print("\n  [Other Downloaders]")
-            print("    4. Download from Generic URL (HTTP/S, FTP, etc.)")
-            print("    5. Download Torrent")
-            print("\n  [Management & Utilities]")
-            print("    N. Navigate Directories & Set Download Location (TODO)")
-            print("    S. Storage Overview (TODO)")
-            print("    F. Manage Favorite Locations (TODO)")
-            print("    C. Configuration Settings (TODO)")
-            print("    D. Check Dependencies (Interactive)")
-            print("    X. Exit YtDorn")
+# Calculate percentage and bar
+percentage = (current / self.total * 100) if self.total > 0else 0
+filled = int(self.width * current / self.total) if self.total > 0 else 0
 
-            choice = input("\nEnter your choice: ").strip().lower()
+# Create modern progress bar with gradient
+bar_chars = '█▉▊▋▌▍▎▏'
+bar = ''
+for i in range(filled):
+intensity = min(255, 50 + (i * 205 // self.width))
+bar += Colors.rgb(intensity, 100, 255) + '█'
 
-            actions = {
-                '1': self.download_youtube_single_interactive,
-                '2': self.download_youtube_playlist_interactive,
-                '3': self.download_youtube_channel_interactive,
-                '4': self.download_generic_url_interactive,
-                '5': self.download_torrent_interactive,
-                'n': self.navigate_directory_placeholder,
-                's': self.show_storage_overview_placeholder,
-                'f': self.manage_favorites_placeholder,
-                'c': self.show_configuration_menu_placeholder,
-                'd': self.check_dependencies_interactive,
-            }
+if filled < self.width:
+bar += Colors.MUTED + '░' * (self.width - filled)
+bar += Colors.RESET
 
-            if choice == 'x':
-                print("\n👋 Exiting YtDorn. Goodbye!")
-                if self.torrent_session and LIBTORRENT_AVAILABLE:
-                    print("Shutting down torrent session...")
-                    # self.torrent_session.pause() # Consider graceful shutdown
-                break
-            elif choice in actions:
-                actions[choice]()
-            else:
-                print("❌ Invalid choice. Please try again.")
-            
-            if choice != 'x': 
-                input("\nPress Enter to return to menu...")
+# Calculate ETA
+elapsed = now - self.start_time
+if current > 0 and elapsed > 0:
+rate = current / elapsed
+eta_seconds = (self.total - current) / rate if rate > 0else 0
+eta = self._format_duration(eta_seconds)
+else:
+eta = "--:--"
 
-    def check_dependencies_interactive(self):
-        global PSUTIL_AVAILABLE, LIBTORRENT_AVAILABLE, LT_MODULE
-        self.show_header("Dependency Check (Interactive)")
-        print("Status of required and optional dependencies:\n")
-        
-        try: # yt-dlp
-            importlib.import_module("yt_dlp")
-            result = subprocess.run(['yt-dlp', '--version'], capture_output=True, check=True, text=True, encoding='utf-8', errors='replace')
-            print(f"✅ yt-dlp: Installed ({result.stdout.strip()})")
-        except: print("❌ yt-dlp: NOT INSTALLED or not in PATH. (Critical)")
+# Format sizes
+current_size = self._format_bytes(current)
+total_size = self._format_bytes(self.total)
 
-        # psutil
-        if PSUTIL_AVAILABLE:
-            try:
-                import psutil as psutil_check
-                print(f"✅ psutil: Installed (Version: {psutil_check.__version__})")
-            except: print(f"⚠️ psutil: Auto-detected but failed to import now.")
-        else: print("⚠️ psutil: Not installed. (Optional, for detailed storage overview)")
-        
-        # libtorrent
-        if LIBTORRENT_AVAILABLE and LT_MODULE:
-            print(f"✅ libtorrent: Installed (Version: {LT_MODULE.version})")
-        else: print("❌ libtorrent: NOT INSTALLED. (Required for Torrent downloads)")
+# Get current speed
+current_speed = ""
+if self.speed_samples:
+recent_speed = (current - self.speed_samples[0][1]) / max(now - self.speed_samples[0][0], 1)
+current_speed = f" @ {self._format_bytes(recent_speed)}/s"
 
-        # aria2c
-        self.aria2c_path = shutil.which("aria2c") 
-        if self.aria2c_path:
-            try:
-                result = subprocess.run([self.aria2c_path, '--version'], capture_output=True, text=True, check=True, encoding='utf-8', errors='replace')
-                print(f"✅ aria2c: Installed ({result.stdout.splitlines()[0].strip()})")
-            except: print(f"⚠️ aria2c: Detected but version check failed.")
-        else: print("⚠️ aria2c: Not found. (Optional, for faster segmented downloads)")
-        
-        # ffmpeg
-        if shutil.which("ffmpeg"): print(f"✅ ffmpeg: Detected. (Recommended for yt-dlp)")
-        else: print("⚠️ ffmpeg: Not found. (Optional, yt-dlp may have limited format options)")
+return (f"\r{Colors.PRIMARY}▶{Colors.RESET} {self.description[:30]:<30} "
+f"[{bar}] {percentage:5.1f}% "
+f"({current_size}/{total_size}){current_speed} "
+f"ETA: {eta} {extra_info}")
 
-    def _run_yt_dlp_command(self, command_args: List[str], title: str = "yt-dlp process") -> bool:
-        print(f"\n🔄 Starting: {title}")
-        safe_display_args = ' '.join(shlex.quote(str(arg)) for arg in command_args) # Ensure all args are strings
-        print(f"   Command: yt-dlp {safe_display_args}")
-        
-        final_command = ['yt-dlp'] + [str(arg) for arg in command_args] # Ensure all args are strings
-        
-        if self.aria2c_path and self.config.get('use_aria2c_if_available', True):
-            is_downloader_set = any(arg.startswith('--downloader') for arg in command_args)
-            if not is_downloader_set:
-                 final_command.extend(['--downloader', 'aria2c'])
-                 # Example aria2c args for better performance on good connections
-                 final_command.extend(['--downloader-args', 'aria2c:-j16 -x16 -s16 -k1M'])
+@staticmethod
+def _format_bytes(bytes_val: float) -> str:
+"""Format bytes with appropriate units"""
+for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+if bytes_val < 1024:
+return f"{bytes_val:.1f}{unit}"
+bytes_val /= 1024
+return f"{bytes_val:.1f}PB"
 
+@staticmethod
+def _format_duration(seconds: float) -> str:
+"""Format duration in human readable format"""
+if seconds < 60:
+return f"{int(seconds)}s"
+elif seconds < 3600:
+return f"{int(seconds // 60)}m {int(seconds % 60)}s"
+else:
+hours = int(seconds // 3600)
+minutes = int((seconds % 3600) // 60)
+return f"{hours}h {minutes}m"
 
-        try:
-            process = subprocess.Popen(final_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
-            spinner = ['-', '\\', '|', '/']; idx = 0
-            while process.poll() is None:
-                print(f"\r   Progress: {spinner[idx % len(spinner)]} Running...", end=""); idx+=1; time.sleep(0.2)
-            stdout, stderr = process.communicate(timeout=3600) # Add a long timeout
-            print("\r", " " * 40, "\r", end="") 
+class ModernUI:
+"""Advanced terminal UI with modern design elements"""
 
-            if process.returncode == 0:
-                print(f"✅ Success: {title} completed."); return True
-            else:
-                print(f"❌ Error: {title} failed (Code: {process.returncode}).")
-                if stderr: print("   yt-dlp STDERR:\n", '\n'.join([f"     {line}" for line in stderr.splitlines()]))
-                if stdout: print("   yt-dlp STDOUT:\n", '\n'.join([f"     {line}" for line in stdout.splitlines()]))
-                return False
-        except subprocess.TimeoutExpired:
-            print(f"❌ Timeout: {title} took too long and was terminated.")
-            process.kill()
-            return False
-        except FileNotFoundError: print("❌ CRITICAL: yt-dlp command not found."); return False
-        except Exception as e: print(f"❌ Unexpected error running yt-dlp: {e}"); return False
+@staticmethod
+def print_banner():
+"""Display enhanced banner with version info"""
+banner_text = """
+╭─────────────────────────────────────────────╮
+│  ██╗   ██╗████████╗██████╗  ██████╗ ██████╗ │
+│  ╚██╗ ██╔╝╚══██╔══╝██╔══██╗██╔═══██╗██╔══██╗│
+│   ╚████╔╝    ██║   ██║  ██║██║   ██║██████╔╝│
+│    ╚██╔╝     ██║   ██║  ██║██║   ██║██╔══██╗│
+│     ██║      ██║   ██████╔╝╚██████╔╝██║  ██║│
+│     ╚═╝      ╚═╝   ╚═════╝  ╚═════╝ ╚═╝  ╚═╝│
+╰─────────────────────────────────────────────╯"""
 
-    def _get_yt_dlp_json_info(self, url: str, extra_args: Optional[List[str]] = None) -> Optional[Dict]:
-        command = ['yt-dlp', '--quiet', '--no-warnings', '--dump-single-json', '--skip-download']
-        if extra_args: command.extend(extra_args)
-        command.append(url)
-        
-        print(f"ℹ️  Fetching info for: {url}...")
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8', errors='replace', timeout=60)
-            return json.loads(result.stdout)
-        except subprocess.TimeoutExpired:
-            print(f"❌ Timeout fetching info for {url}.")
-            return None
-        except subprocess.CalledProcessError as e:
-            stderr_output = e.stderr.strip() if e.stderr else "No stderr output."
-            print(f"❌ Error fetching info with yt-dlp for {url}. Code: {e.returncode}\n   Stderr: {stderr_output}")
-            return None
-        except json.JSONDecodeError: print(f"❌ Error decoding JSON from yt-dlp for {url}."); return None
-        except Exception as e: print(f"❌ Unexpected error fetching info: {e}"); return None
+print(Colors.gradient_text(banner_text, (64, 224, 255), (255, 100, 255)))
+print(f"\n{Colors.PRIMARY}{Colors.BOLD}YtDorn v0.1.2{Colors.RESET} {Colors.MUTED}by 0xb0rn3{Colors.RESET}")
+print(f"{Colors.INFO}Super Powerful YouTube Downloader{Colors.RESET}")
+print(f"{Colors.MUTED}https://github.com/0xb0rn3{Colors.RESET}")
+print(Colors.gradient_text('═' * 50, (64, 224, 255), (255, 100, 255)))
 
-    def download_youtube_single_interactive(self):
-        self.show_header("Download Single YouTube Video")
-        url = input("Enter YouTube video URL: ").strip()
-        if not url: print("❌ No URL entered."); return
-        info = self._get_yt_dlp_json_info(url)
-        if not info: return
-        print(f"\n🎥 Video Found:\n   Title: {info.get('title', 'N/A')}\n   Uploader: {info.get('uploader', 'N/A')}\n   Duration: {time.strftime('%H:%M:%S', time.gmtime(info.get('duration', 0)))}")
-        if input("\nProceed with download? (y/N): ").lower() != 'y': print("Download cancelled."); return
-        
-        output_path_base = self.download_dir / "YouTube" / "Single Videos"
-        output_path_base.mkdir(parents=True, exist_ok=True)
-        output_template = str(output_path_base / self.config.get('yt_output_template_video'))
-        
-        args = ['--format', self.config.get('default_yt_quality'), '--output', output_template, url]
-        self._run_yt_dlp_command(args, title=f"Downloading '{info.get('title', 'video')}'")
+@staticmethod
+def create_interactive_menu(title: str, options: List[Tuple[str, str, str]],
+show_shortcuts: bool = True) -> str:
+"""Create modern interactive menu with shortcuts and descriptions"""
+print(f"\n{Colors.PRIMARY}{Colors.BOLD}┌─ {title} ─┐{Colors.RESET}")
 
-    def download_youtube_playlist_interactive(self):
-        self.show_header("Download YouTube Playlist")
-        url = input("Enter YouTube playlist URL: ").strip()
-        if not url: print("❌ No URL entered."); return
-        info = self._get_yt_dlp_json_info(url, ['--flat-playlist']) # Fast way to get count and title
-        if not info: return
-        
-        video_count = info.get('playlist_count', len(info.get('entries', [])))
-        print(f"\n🎶 Playlist Found:\n   Title: {info.get('title', 'N/A')}\n   Uploader: {info.get('uploader', 'N/A')}\n   Videos: {video_count}")
-        if video_count == 0: print("   Playlist appears empty."); return
-        if input("\nProceed with download? (y/N): ").lower() != 'y': print("Download cancelled."); return
+for i, (key, title_text, description) in enumerate(options,1):
+icon = key if len(key) == 1 else str(i)
+shortcut = f"[{icon}]" if show_shortcuts else f"[{i}]"
+print(f"{Colors.INFO}{shortcut:<4}{Colors.RESET} {title_text}")
+if description:
+print(f"     {Colors.MUTED}{description}{Colors.RESET}")
 
-        output_path_base = self.download_dir / "YouTube" / "Playlists"
-        # Output template itself should create subfolder for playlist name
-        output_template = str(output_path_base / self.config.get('yt_output_template_playlist'))
-        
-        args = ['--format', self.config.get('default_yt_quality'), '--output', output_template, '--yes-playlist', '--ignore-errors', url]
-        self._run_yt_dlp_command(args, title=f"Downloading playlist '{info.get('title', 'playlist')}'")
+print(f"{Colors.PRIMARY}└{'─' * (len(title) + 4)}┘{Colors.RESET}")
 
-    def download_youtube_channel_interactive(self):
-        self.show_header("Download YouTube Channel")
-        url = input("Enter YouTube channel URL: ").strip()
-        if not url: print("❌ No URL entered."); return
-        info = self._get_yt_dlp_json_info(url, ['--flat-playlist']) # Fast way to get count and title
-        if not info: return
-        
-        video_count = info.get('playlist_count', len(info.get('entries', []))) # yt-dlp treats channel as a type of playlist
-        print(f"\n📺 Channel Found:\n   Name: {info.get('uploader', info.get('channel', 'N/A'))}\n   Title: {info.get('title', 'N/A')}\n   Videos: {video_count}")
-        if video_count == 0: print("   Channel appears empty or has no public videos."); return
-        print("\n   Note: This will download all public videos. Use output templates for organization.")
-        if input("\nProceed with download? (y/N): ").lower() != 'y': print("Download cancelled."); return
+while True:
+prompt = f"\n{Colors.PRIMARY}❯{Colors.RESET} Select option: "
+choice = input(prompt).strip().lower()
 
-        output_path_base = self.download_dir / "YouTube" / "Channels"
-        output_template = str(output_path_base / self.config.get('yt_output_template_channel'))
-        
-        args = ['--format', self.config.get('default_yt_quality'), '--output', output_template, '--ignore-errors', url]
-        self._run_yt_dlp_command(args, title=f"Downloading channel '{info.get('title', 'channel')}'")
+# Check for direct key match or number
+for i, (key, _, _) in enumerate(options, 1):
+if choice == key.lower() or choice == str(i):
+return str(i)
 
-    def download_generic_url_interactive(self):
-        self.show_header("Download from Generic URL")
-        url = input("Enter URL to download: ").strip()
-        if not url: print("❌ No URL entered."); return
-        
-        default_filename = url.split('/')[-1].split('?')[0] if url.split('/')[-1] else "downloaded_file"
-        filename = input(f"Enter filename (default: '{default_filename}'): ").strip() or default_filename
-        
-        output_path_base = self.download_dir / "Generic Downloads"
-        output_path_base.mkdir(parents=True, exist_ok=True)
-        output_target = str(output_path_base / filename)
-        
-        print(f"\nAttempting to download from: {url}\nSaving as: {output_target}")
-        if input("\nProceed? (y/N): ").lower() != 'y': print("Download cancelled."); return
-        args = ['--output', output_target, url]
-        self._run_yt_dlp_command(args, title=f"Downloading '{filename}'")
+print(f"{Colors.ERROR}Invalid selection. Please try again.{Colors.RESET}")
 
-    def setup_torrent_session_on_init(self):
-        global LT_MODULE
-        if not LIBTORRENT_AVAILABLE or not LT_MODULE: return False
-        if self.torrent_session: return True
-        try:
-            settings = {
-                'listen_interfaces': f'0.0.0.0:{self.config.get("torrent_port_min")},[::]:{self.config.get("torrent_port_min")}',
-                'user_agent': f'YtDorn/{self.version} libtorrent/{LT_MODULE.version}',
-                'alert_mask': LT_MODULE.alert_category.status | LT_MODULE.alert_category.storage | LT_MODULE.alert_category.error,
-                'dht_bootstrap_nodes': 'dht.libtorrent.org:25401,router.utorrent.com:6881,router.bittorrent.com:6881,dht.transmissionbt.com:6881'
-            }
-            self.torrent_session = LT_MODULE.session(settings)
-            print(f"✅ Torrent session initialized (libtorrent {LT_MODULE.version}).")
-            return True
-        except Exception as e: print(f"❌ Failed to initialize torrent session: {e}"); self.torrent_session = None; return False
+@staticmethod
+def get_user_input(prompt: str, default: str = None, validator=None) -> str:
+"""Enhanced input with validation and defaults"""
+display_default = f" ({default})" if default else ""
+full_prompt = f"{Colors.PRIMARY}❯{Colors.RESET} {prompt}{Colors.MUTED}{display_default}{Colors.RESET}: "
 
-    def download_torrent_interactive(self):
-        global LT_MODULE
-        self.show_header("Download Torrent")
-        if not LIBTORRENT_AVAILABLE or not LT_MODULE:
-            print("❌ Torrent functionality is disabled: libtorrent not available."); return
-        if not self.torrent_session and not self.setup_torrent_session_on_init():
-             print("❌ Could not start torrent session."); return
+while True:
+value = input(full_prompt).strip()
+if not value and default:
+return default
+if not value:
+print(f"{Colors.ERROR}This field is required.{Colors.RESET}")
+continue
+if validator and not validator(value):
+print(f"{Colors.ERROR}Invalid input. Please try again.{Colors.RESET}")
+continue
+return value
 
-        source_type = input("Enter 'm' for magnet link or 'f' for .torrent file path: ").strip().lower()
-        save_path = Path(self.config.get('torrent_save_path'))
-        save_path.mkdir(parents=True, exist_ok=True)
-        handle = None; name_hint = "torrent_download"
+@staticmethod
+def show_info_panel(title: str, items: Dict[str, str]):
+"""Display information in a modern panel format"""
+max_key_length = max(len(key) for key in items.keys()) if items else 0
 
-        if source_type == 'm':
-            uri = input("Enter magnet link: ").strip()
-            if not uri.startswith("magnet:?"): print("❌ Invalid magnet link."); return
-            try:
-                params = LT_MODULE.parse_magnet_uri(uri)
-                params.save_path = str(save_path)
-                name_hint = params.name or uri[:50]+"..."
-                handle = self.torrent_session.add_torrent(params)
-                print(f"➕ Added torrent (magnet): {name_hint}")
-            except Exception as e: print(f"❌ Error adding magnet: {e}"); return
-        elif source_type == 'f':
-            f_path_str = input("Enter path to .torrent file: ").strip()
-            f_path = Path(f_path_str)
-            if not f_path.is_file(): print(f"❌ File not found: {f_path}"); return
-            try:
-                ti = LT_MODULE.torrent_info(str(f_path))
-                params = {'ti': ti, 'save_path': str(save_path)}
-                name_hint = ti.name()
-                handle = self.torrent_session.add_torrent(params)
-                print(f"➕ Added torrent (file): {name_hint}")
-            except Exception as e: print(f"❌ Error adding .torrent file: {e}"); return
-        else: print("❌ Invalid source type."); return
-        
-        if not handle or not handle.is_valid(): print("❌ Failed to add torrent."); return
-        self.active_torrent_handles[name_hint] = handle
+print(f"\n{Colors.INFO}┌─ {title} {'─' * (max_key_length + 20)}")
+for key, value in items.items():
+print(f"{Colors.INFO}│{Colors.RESET} {key:<{max_key_length}} : {Colors.PRIMARY}{value}{Colors.RESET}")
+print(f"{Colors.INFO}└{'─' * (max_key_length + len(title) +25)}{Colors.RESET}")
 
-        print(f"\n⏳ Monitoring '{name_hint}' (Ctrl+C to stop monitoring)...")
-        try:
-            while handle.is_valid() and not \
-                  (handle.status().state == LT_MODULE.torrent_status.states.seeding or \
-                   handle.status().state == LT_MODULE.torrent_status.states.finished):
-                s = handle.status()
-                states = ['queued', 'checking', 'dl metadata', 'dl', 'finished', 'seeding', 'allocating', 'chk fastresume']
-                bar = self.create_usage_bar(s.progress * 100, 30)
-                print(f"\r{name_hint[:25]:<25} {bar} {s.progress*100:.2f}% "
-                      f"DL:{s.download_rate/1024:.1f}KiB/s UL:{s.upload_rate/1024:.1f}KiB/s "
-                      f"S:{s.num_seeds}({s.list_seeds}) P:{s.num_peers}({s.list_peers}) St:{states[s.state]}", end=" ")
-                sys.stdout.flush()
-                
-                # Basic alert processing for completion/error
-                alerts = self.torrent_session.pop_alerts()
-                for alert in alerts:
-                    if alert.handle != handle: continue # Ensure alert is for current torrent
-                    if isinstance(alert, LT_MODULE.torrent_finished_alert): print(f"\n✅ Torrent '{name_hint}' finished."); break
-                    if isinstance(alert, LT_MODULE.torrent_error_alert): print(f"\n❌ Torrent error '{name_hint}': {alert.error.message()}"); break
-                else: # No break from inner loop means no finish/error alert yet
-                    time.sleep(1)
-                    continue # Continue outer while loop
-                break # Break outer while loop if finish/error alert processed
-        except KeyboardInterrupt: print(f"\nℹ️  Stopped monitoring '{name_hint}'. Continues in background.")
-        except Exception as e: print(f"\n❌ Torrent monitoring error: {e}")
+class DependencyManager:
+"""Advanced dependency management with better error handling"""
 
-        if handle.is_valid():
-            s = handle.status()
-            if s.state == LT_MODULE.torrent_status.states.seeding: print(f"\n✅ '{name_hint}' completed, now seeding.")
-            elif s.state == LT_MODULE.torrent_status.states.finished: print(f"\n✅ '{name_hint}' finished (not seeding).")
-            else: print(f"\nℹ️  '{name_hint}' monitoring ended. State: {s.state}")
+@staticmethod
+def check_system_dependencies() -> Dict[str, bool]:
+"""Comprehensive dependency check"""
+deps = {}
 
-    def create_usage_bar(self, percentage: float, width: int = 20) -> str:
-        if not (0 <= percentage <= 100): percentage = 0
-        filled = int(round(percentage / 100 * width))
-        return f"[{'█' * filled}{'░' * (width - filled)}]"
+# Check yt-dlp - Note: package name is 'yt-dlp' but import name is 'yt_dlp'
+# First check if command-line tool is available
+deps['yt-dlp'] = shutil.which('yt-dlp') is not None
 
-    # --- Placeholder Methods for User to Implement ---
-    def navigate_directory_placeholder(self):
-        self.show_header("Navigate Directories (TODO)")
-        print("This feature (Navigate Directories & Set Download Location) needs to be implemented.")
-        print("Please integrate your previous directory navigation logic here.")
+# If command-line tool isn't found, check if Python module is available
+if not deps['yt-dlp']:
+try:
+# Import using underscore, not hyphen
+import yt_dlp
+deps['yt-dlp'] = True
+except ImportError:
+# Both command-line and Python module checks failed
+pass
 
-    def show_storage_overview_placeholder(self):
-        self.show_header("Storage Overview (TODO)")
-        if PSUTIL_AVAILABLE:
-            print("psutil is available. Implement storage overview logic here.")
-        else:
-            print("psutil is NOT available. This feature would be limited.")
-            print("Please install 'psutil' for detailed storage information.")
-        print("Integrate your previous storage overview logic here.")
+return deps
 
-    def manage_favorites_placeholder(self):
-        self.show_header("Manage Favorite Locations (TODO)")
-        print("This feature needs to be implemented.")
-        print("Please integrate your previous favorites management logic here.")
+@staticmethod
+def get_installation_instructions(missing_deps: List[str]) -> Dict[str, str]:
+"""Provide installation instructions for missing dependencies"""
+instructions = {}
 
-    def show_configuration_menu_placeholder(self):
-        self.show_header("Configuration Settings (TODO)")
-        print("This feature needs to be implemented.")
-        print("Please integrate your previous configuration menu logic here,")
-        print("allowing users to change settings like default paths, quality, etc.")
+for dep in missing_deps:
+if dep == 'yt-dlp':
+instructions[dep] = (
+"Install yt-dlp using one of these methods:\n"
+"  pip install yt-dlp\n"
+"  Or visit: https://github.com/yt-dlp/yt-dlp#installation"
+)
 
+return instructions
 
-if __name__ == '__main__':
-    if os.name == 'nt': # For better Unicode support on Windows cmd
-        try:
-            import ctypes
-            kernel32 = ctypes.windll.kernel32; kernel32.SetConsoleOutputCP(65001)
-        except: pass # Ignore if it fails
+@staticmethod
+def install_missing_dependencies(spinner: ModernSpinner):
+"""Install missing dependencies with progress feedback"""
+deps = DependencyManager.check_system_dependencies()
 
-    app = YtDorn()
-    try:
-        app.main_loop()
-    except KeyboardInterrupt:
-        print("\nℹ️ User interrupted. Exiting YtDorn...")
-    finally:
-        if app.torrent_session and LIBTORRENT_AVAILABLE and LT_MODULE:
-            print("Pausing torrent session on exit...")
-            app.torrent_session.pause()
-            # Consider saving resume data here for all active torrents
-            # for name, handle in app.active_torrent_handles.items():
-            # if handle.is_valid() and handle.has_metadata():
-            # handle.save_resume_data(LT_MODULE. υψηλή_ακρίβεια_resume_data)
-            print("Torrent session paused. Some operations might continue briefly to save state.")
-            time.sleep(1) # Brief pause for libtorrent to process
-        print("YtDorn shutdown complete.")
+if all(deps.values()):
+return True
+
+spinner.start("Checking system dependencies...")
+time.sleep(1)
+spinner.stop()
+
+#        if not deps['python3']:
+#            print(f"{Colors.ERROR}Python 3.7+ is required. Please upgrade Python.{Colors.RESET}")
+#            return False
+
+if not deps['yt-dlp']:
+spinner.start("Installing yt-dlp...")
+try:
+subprocess.check_call([
+sys.executable, "-m", "pip", "install", "yt-dlp", "--break-system-packages"
+], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+spinner.stop(f"{Colors.SUCCESS}✓ yt-dlp installed successfully{Colors.RESET}")
+except subprocess.CalledProcessError:
+spinner.stop(f"{Colors.ERROR}✗ Failed to install yt-dlp Please manually install using pipx install yt-dlp or pip install yt-dlp OR verify you have pip {Colors.RESET}")
+return False
+
+if not deps['ffmpeg']:
+spinner.start("Setting up ffmpeg...")
+if DependencyManager._install_ffmpeg():
+spinner.stop(f"{Colors.SUCCESS}✓ ffmpeg configured successfully{Colors.RESET}")
+else:
+spinner.stop(f"{Colors.WARNING}⚠ ffmpeg not found -some features may be limited{Colors.RESET}")
+
+return True
+
+@staticmethod
+def _install_ffmpeg() -> bool:
+"""Attempt to install ffmpeg based on the system"""
+system = platform.system().lower()
+
+try:
+if system == "windows":
+# Try winget first, then chocolatey
+for cmd in [['winget', 'install', 'ffmpeg'], ['choco', 'install', 'ffmpeg', '-y']]:
+if shutil.which(cmd[0]):
+subprocess.check_call(cmd, capture_output=True)
+return True
+elif system == "darwin":
+if shutil.which('brew'):
+subprocess.check_call(['brew', 'install', 'ffmpeg'], capture_output=True)
+return True
+elif system == "linux":
+# Try multiple package managers
+pkg_managers = [
+(['apt', 'update'], ['apt', 'install', '-y', 'ffmpeg']),
+(['dnf', 'install', '-y', 'ffmpeg'],),
+(['pacman', '-Sy', '--noconfirm', 'ffmpeg-full'],),
+(['zypper', 'install', '-y', 'ffmpeg'],)
+]
+
+for commands in pkg_managers:
+if shutil.which(commands[0][0]):
+for cmd in commands:
+subprocess.check_call(cmd, capture_output=True)
+return True
+except subprocess.CalledProcessError:
+pass
+
+return False
+
+class SuperDownloader:
+"""Advanced downloader with comprehensive YouTube support"""
+
+def __init__(self):
+self.progress_bars = {}
+self.download_stats = {}
+self.concurrent_downloads = 3
+
+def download_hook(self, d: Dict[str, Any]):
+"""Enhanced progress hook with detailed tracking"""
+filename = d.get('filename', 'Unknown')
+base_filename = os.path.basename(filename)
+
+if d['status'] == 'downloading':
+if base_filename not in self.progress_bars:
+total_bytes = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
+self.progress_bars[base_filename] = AdvancedProgressBar(
+total_bytes,
+base_filename[:25]
+)
+self.download_stats[base_filename] = {'start_time':time.time()}
+
+downloaded = d.get('downloaded_bytes', 0)
+speed = d.get('speed', 0)
+
+extra_info = ""
+if speed:
+extra_info = f"({AdvancedProgressBar._format_bytes(speed)}/s)"
+
+progress_line = self.progress_bars[base_filename].update(downloaded, extra_info)
+sys.stdout.write(progress_line)
+sys.stdout.flush()
+
+elif d['status'] == 'finished':
+if base_filename in self.progress_bars:
+duration = time.time() - self.download_stats[base_filename]['start_time']
+sys.stdout.write('\r\033[K')
+print(f"{Colors.SUCCESS}✓ {base_filename} completedin "
+f"{AdvancedProgressBar._format_duration(duration)}{Colors.RESET}")
+del self.progress_bars[base_filename]
+del self.download_stats[base_filename]
+
+def get_video_info(self, url: str) -> Dict[str, Any]:
+"""Extract comprehensive video information"""
+from yt_dlp import YoutubeDL
+
+ydl_opts = {
+'quiet': True,
+'no_warnings': True,
+'extract_flat': False,
+}
+
+with YoutubeDL(ydl_opts) as ydl:
+try:
+info = ydl.extract_info(url, download=False)
+return self._process_video_info(info)
+except Exception as e:
+raise Exception(f"Could not extract video info: {str(e)}")
+
+def _process_video_info(self, info: Dict[str, Any]) -> Dict[str, Any]:
+"""Process and clean video information"""
+processed = {
+'title': info.get('title', 'Unknown'),
+'uploader': info.get('uploader', 'Unknown'),
+'duration': info.get('duration', 0),
+'view_count': info.get('view_count', 0),
+'upload_date': info.get('upload_date', ''),
+'description': info.get('description', '')[:200] + '...' if info.get('description') else '',
+'formats': len(info.get('formats', [])),
+'is_live': info.get('is_live', False),
+'is_playlist': 'entries' in info,
+}
+
+if processed['is_playlist']:
+processed['playlist_count'] = len(info.get('entries', []))
+processed['playlist_title'] = info.get('title', 'Unknown Playlist')
+
+return processed
+
+def download_with_options(self, url: str, options: Dict[str, Any]):
+"""Download with comprehensive options"""
+from yt_dlp import YoutubeDL
+
+# Build yt-dlp options
+ydl_opts = {
+'outtmpl': options.get('output_template', '%(title)s.%(ext)s'),
+'format': options.get('format', 'best'),
+'writesubtitles': options.get('subtitles', False),
+'writeautomaticsub': options.get('auto_subtitles', False),
+'writethumbnail': options.get('thumbnail', False),
+'writedescription': options.get('description', False),
+'writeinfojson': options.get('metadata', False),
+'ignoreerrors': True,
+'no_warnings': True,
+'progress_hooks': [self.download_hook],
+}
+
+# Add post-processors based on options
+postprocessors = []
+
+if options.get('extract_audio'):
+postprocessors.append({
+'key': 'FFmpegExtractAudio',
+'preferredcodec': options.get('audio_format', 'mp3'),
+'preferredquality': options.get('audio_quality', '192'),
+})
+
+if options.get('embed_subs'):
+postprocessors.append({
+'key': 'FFmpegEmbedSubtitle',
+})
+
+if postprocessors:
+ydl_opts['postprocessors'] = postprocessors
+
+# Handle playlist options
+if options.get('playlist_items'):
+ydl_opts['playlist_items'] = options['playlist_items']
+
+try:
+with YoutubeDL(ydl_opts) as ydl:
+ydl.download([url])
+return True
+except Exception as e:
+print(f"{Colors.ERROR}Download failed: {str(e)}{Colors.RESET}")
+return False
+
+@staticmethod
+def get_format_options() -> List[Tuple[str, str, str]]:
+"""Get available format options with descriptions"""
+return [
+('best', '🎬 Best Quality', 'Highest available quality (video + audio)'),
+('1080p', '📺 1080p HD', 'Full HD quality (1920x1080)'),
+('720p', '📹 720p HD', 'HD quality (1280x720)'),
+('480p', '📱 480p SD', 'Standard definition (854x480)'),
+('audio', '🎵 Audio Only', 'Extract audio only (best quality)'),
+('mp3', '🎶 MP3 Audio', 'Convert to MP3 format'),
+('custom', '⚙ Custom', 'Specify custom format'),
+]
+
+def create_advanced_options_menu() -> Dict[str, Any]:
+"""Create comprehensive options selection"""
+ui = ModernUI()
+options = {}
+
+# Output directory
+options['output_dir'] = ui.get_user_input(
+"Output directory",
+default="downloads",
+validator=lambda x: True  # Allow any directory name
+)
+
+# Format selection
+format_options = SuperDownloader.get_format_options()
+format_choice = ui.create_interactive_menu("Format Selection", format_options)
+format_map = {
+'1': 'best[ext=mp4]/best',
+'2': 'best[height<=1080][ext=mp4]/best[height<=1080]',
+'3': 'best[height<=720][ext=mp4]/best[height<=720]',
+'4': 'best[height<=480][ext=mp4]/best[height<=480]',
+'5': 'bestaudio',
+'6': 'bestaudio[ext=m4a]/bestaudio',
+'7': ui.get_user_input("Enter custom format string", default="best")
+}
+options['format'] = format_map.get(format_choice, 'best')
+
+# Additional options
+extra_options = [
+('y', '📥 Download subtitles', ''),
+('n', '❌ Skip subtitles', ''),
+]
+sub_choice = ui.create_interactive_menu("Subtitle Options", extra_options)
+options['subtitles'] = sub_choice == '1'
+
+extra_features = [
+('y', '🖼 Download thumbnail', ''),
+('n', '❌ Skip thumbnail', ''),
+]
+thumb_choice = ui.create_interactive_menu("Thumbnail Options", extra_features)
+options['thumbnail'] = thumb_choice == '1'
+
+# Set output template
+safe_title = "%(title).100s"
+if options['subtitles'] or options['thumbnail']:
+template = f"{options['output_dir']}/{safe_title}.%(ext)s"
+else:
+template = f"{options['output_dir']}/{safe_title}.%(ext)s"
+options['output_template'] = template
+
+return options
+
+def validate_url(url: str) -> bool:
+"""Validate YouTube URL"""
+youtube_domains = ['youtube.com', 'youtu.be', 'm.youtube.com', 'music.youtube.com']
+try:
+parsed = urlparse(url)
+return any(domain in parsed.netloc for domain in youtube_domains)
+except:
+return False
+
+def main():
+"""Enhanced main function with comprehensive features"""
+# Setup
+ui = ModernUI()
+spinner = ModernSpinner()
+downloader = SuperDownloader()
+
+# Signal handler for graceful exit
+def signal_handler(signum, frame):
+print(f"\n\n{Colors.WARNING}🛑 Download interrupted. Exiting gracefully...{Colors.RESET}\n")
+sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+# Display banner
+ui.print_banner()
+
+# Check dependencies
+if not DependencyManager.install_missing_dependencies(spinner):
+print(f"{Colors.ERROR}Failed to install required dependencies. Exiting.{Colors.RESET}")
+sys.exit(1)
+
+print(f"\n{Colors.SUCCESS}🚀 System ready! All dependencies satisfied.{Colors.RESET}")
+
+while True:
+try:
+print(f"\n{Colors.gradient_text('═' * 60, (64, 224, 255), (255, 100, 255))}")
+
+# Main menu
+main_options = [
+('s', '🎥 Single Video', 'Download individual video'),
+('p', '📋 Playlist/Channel', 'Download playlist or entire channel'),
+('i', '📊 Video Info', 'Get detailed video information'),
+('q', '🚪 Quit', 'Exit the application'),
+]
+
+choice = ui.create_interactive_menu("Main Menu", main_options)
+
+if choice == '4':  # Quit
+print(f"\n{Colors.SUCCESS}👋 Thank you for using YtDorn! Goodbye!{Colors.RESET}\n")
+break
+
+# Get URL
+url = ui.get_user_input("YouTube URL", validator=validate_url)
+
+if choice == '3':  # Video info
+spinner.start("Extracting video information...")
+try:
+info = downloader.get_video_info(url)
+spinner.stop()
+
+# Display info
+info_items = {
+'Title': info['title'],
+'Uploader': info['uploader'],
+'Duration': AdvancedProgressBar._format_duration(info['duration']),
+'Views': f"{info['view_count']:,}" if info['view_count'] else 'Unknown',
+'Upload Date': info['upload_date'],
+'Available Formats': str(info['formats']),
+'Is Live': 'Yes' if info['is_live'] else 'No',
+}
+
+if info['is_playlist']:
+info_items['Playlist Title'] = info['playlist_title']
+info_items['Video Count'] = str(info['playlist_count'])
+
+ui.show_info_panel("Video Information", info_items)
+
+except Exception as e:
+spinner.stop(f"{Colors.ERROR}Failed to get video info: {str(e)}{Colors.RESET}")
+
+continue
+
+# Get download options
+spinner.start("Analyzing video...")
+try:
+info = downloader.get_video_info(url)
+spinner.stop()
+
+# Show basic info
+basic_info = {
+'Title': info['title'][:50] + '...' if len(info['title']) > 50 else info['title'],
+'Type': 'Playlist' if info['is_playlist'] else 'Single Video',
+'Duration/Count': (f"{info['playlist_count']} videos" if info['is_playlist']
+else AdvancedProgressBar._format_duration(info['duration'])),
+}
+ui.show_info_panel("Download Preview", basic_info)
+
+except Exception as e:
+spinner.stop(f"{Colors.ERROR}Error: {str(e)}{Colors.RESET}")
+continue
+
+# Get advanced options
+options = create_advanced_options_menu()
+
+# Confirm download
+confirm_options = [
+('y', '✅ Start Download', 'Begin downloading with selected options'),
+('n', '❌ Cancel', 'Return to main menu'),
+('m', '⚙ Modify Options', 'Change download settings'),
+]
+
+confirm_choice = ui.create_interactive_menu("Confirm Download", confirm_options)
+
+if confirm_choice == '2':  # Cancel
+continue
+elif confirm_choice == '3':  # Modify options
+options = create_advanced_options_menu()
+confirm_choice = '1'  # Proceed with download
+
+if confirm_choice == '1':  # Start download
+print(f"\n{Colors.PRIMARY}🚀 Starting download...{Colors.RESET}")
+
+# Create output directory
+os.makedirs(options['output_dir'], exist_ok=True)
+
+# Start download
+success = downloader.download_with_options(url, options)
+
+if success:
+print(f"\n{Colors.SUCCESS}✨ Download completedsuccessfully!{Colors.RESET}")
+print(f"{Colors.INFO}📁 Files saved to: {os.path.abspath(options['output_dir'])}{Colors.RESET}")
+else:
+print(f"\n{Colors.ERROR}❌ Download failed. Please check the URL and try again.{Colors.RESET}")
+
+except KeyboardInterrupt:
+print(f"\n\n{Colors.WARNING}🛑 Operation cancelled by user.{Colors.RESET}")
+continue
+except Exception as e:
+print(f"\n{Colors.ERROR}❌ Unexpected error: {str(e)}{Colors.RESET}")
+continue
+
+# Ask if user wants to continue
+continue_options = [
+('y', '🔄 Download Another', 'Start a new download'),
+('n', '🚪 Exit', 'Quit the application'),
+]
+
+continue_choice = ui.create_interactive_menu("Continue?", continue_options)
+if continue_choice == '2':
+print(f"\n{Colors.SUCCESS}👋 Thank you for using YtDorn! Goodbye!{Colors.RESET}\n")
+break
+
+class BatchDownloader:
+"""Handle batch downloads from file or multiple URLs"""
+
+@staticmethod
+def download_from_file(file_path: str, options: Dict[str, Any])-> bool:
+"""Download multiple URLs from a text file"""
+try:
+with open(file_path, 'r', encoding='utf-8') as f:
+urls = [line.strip() for line in f if line.strip() and validate_url(line.strip())]
+
+if not urls:
+print(f"{Colors.ERROR}No valid URLs found in file.{Colors.RESET}")
+return False
+
+print(f"{Colors.INFO}Found {len(urls)} valid URLs to download.{Colors.RESET}")
+
+downloader = SuperDownloader()
+successful = 0
+
+for i, url in enumerate(urls, 1):
+print(f"\n{Colors.PRIMARY}📥 Downloading {i}/{len(urls)}{Colors.RESET}")
+if downloader.download_with_options(url, options):
+successful += 1
+else:
+print(f"{Colors.WARNING}⚠ Skipping failed URL:{url}{Colors.RESET}")
+
+print(f"\n{Colors.SUCCESS}✅ Batch download completed: {successful}/{len(urls)} successful{Colors.RESET}")
+return True
+
+except FileNotFoundError:
+print(f"{Colors.ERROR}File not found: {file_path}{Colors.RESET}")
+return False
+except Exception as e:
+print(f"{Colors.ERROR}Error processing file: {str(e)}{Colors.RESET}")
+return False
+
+class ConfigManager:
+"""Manage user configurations and presets"""
+
+CONFIG_FILE = os.path.expanduser("~/.ytdorn_config.json")
+
+@staticmethod
+def load_config() -> Dict[str, Any]:
+"""Load user configuration"""
+try:
+if os.path.exists(ConfigManager.CONFIG_FILE):
+with open(ConfigManager.CONFIG_FILE, 'r') as f:
+return json.load(f)
+except Exception:
+pass
+return ConfigManager._get_default_config()
+
+@staticmethod
+def save_config(config: Dict[str, Any]) -> bool:
+"""Save user configuration"""
+try:
+with open(ConfigManager.CONFIG_FILE, 'w') as f:
+json.dump(config, f, indent=2)
+return True
+except Exception:
+return False
+
+@staticmethod
+def _get_default_config() -> Dict[str, Any]:
+"""Get default configuration"""
+return {
+'default_output_dir': 'downloads',
+'default_format': 'best',
+'auto_subtitles': False,
+'download_thumbnails': False,
+'concurrent_downloads': 3,
+'presets': {
+'high_quality': {
+'format': 'best[ext=mp4]/best',
+'subtitles': True,
+'thumbnail': True,
+},
+'audio_only': {
+'format': 'bestaudio',
+'extract_audio': True,
+'audio_format': 'mp3',
+},
+'mobile': {
+'format': 'best[height<=720]',
+'subtitles': False,
+'thumbnail': False,
+}
+}
+}
+
+def setup_argument_parser() -> argparse.ArgumentParser:
+"""Setup command line argument parser"""
+parser = argparse.ArgumentParser(
+description='YtDorn v0.1.2 - Super Powerful YouTube Downloader',
+formatter_class=argparse.RawDescriptionHelpFormatter,
+epilog="""
+Examples:
+%(prog)s                                    # Interactive mode
+%(prog)s -u "URL" -f best                   # Quick download
+%(prog)s -u "URL" -f audio --extract-audio  # Audio only
+%(prog)s --batch urls.txt                   # Batch download
+%(prog)s --info "URL"                       # Get video info only
+"""
+)
+
+parser.add_argument('-u', '--url', help='YouTube URL to download')
+parser.add_argument('-f', '--format', default='best', help='Video format/quality')
+parser.add_argument('-o', '--output', default='downloads', help='Output directory')
+parser.add_argument('--extract-audio', action='store_true', help='Extract audio only')
+parser.add_argument('--audio-format', default='mp3', help='Audio format (mp3, m4a, wav)')
+parser.add_argument('--subtitles', action='store_true', help='Download subtitles')
+parser.add_argument('--thumbnail', action='store_true', help='Download thumbnail')
+parser.add_argument('--batch', help='Batch download from file')
+parser.add_argument('--info', help='Get video information only')
+parser.add_argument('--preset', help='Use configuration preset')
+parser.add_argument('--list-presets', action='store_true', help='List available presets')
+parser.add_argument('--quiet', '-q', action='store_true', help='Quiet mode')
+parser.add_argument('--version', action='version', version='YtDorn v0.1.2 by 0xb0rn3')
+
+return parser
+
+def run_cli_mode(args):
+"""Run in command line mode with arguments"""
+if args.list_presets:
+config = ConfigManager.load_config()
+print("Available presets:")
+for name, settings in config['presets'].items():
+print(f"  {name}: {settings}")
+return
+
+if args.info:
+downloader = SuperDownloader()
+try:
+info = downloader.get_video_info(args.info)
+print(json.dumps(info, indent=2))
+except Exception as e:
+print(f"Error: {str(e)}", file=sys.stderr)
+sys.exit(1)
+return
+
+# Build options from command line arguments
+options = {
+'output_dir': args.output,
+'format': args.format,
+'subtitles': args.subtitles,
+'thumbnail': args.thumbnail,
+'extract_audio': args.extract_audio,
+'audio_format': args.audio_format,
+}
+
+# Apply preset if specified
+if args.preset:
+config = ConfigManager.load_config()
+if args.preset in config['presets']:
+preset = config['presets'][args.preset]
+options.update(preset)
+else:
+print(f"Error: Preset '{args.preset}' not found", file=sys.stderr)
+sys.exit(1)
+
+# Set output template
+options['output_template'] = f"{options['output_dir']}/%(title).100s.%(ext)s"
+
+downloader = SuperDownloader()
+
+if args.batch:
+# Batch download mode
+batch_downloader = BatchDownloader()
+success = batch_downloader.download_from_file(args.batch, options)
+sys.exit(0 if success else 1)
+
+elif args.url:
+# Single URL download
+if not validate_url(args.url):
+print("Error: Invalid YouTube URL", file=sys.stderr)
+sys.exit(1)
+
+os.makedirs(options['output_dir'], exist_ok=True)
+success = downloader.download_with_options(args.url, options)
+sys.exit(0 if success else 1)
+
+else:
+print("Error: No URL or batch file specified", file=sys.stderr)
+sys.exit(1)
+
+if __name__ == "__main__":
+try:
+# Check if running in CLI mode (with arguments)
+parser = setup_argument_parser()
+args = parser.parse_args()
+# Check if meaningful CLI arguments were provided
+# These are the arguments that actually indicate the user wants CLI mode
+meaningful_args = [
+args.url,           # User provided a URL to download
+args.batch,         # User provided a batch file
+args.info,          # User wants video info only
+args.list_presets   # User wants to see available presets
+]
+
+# Only run CLI mode if user provided meaningful arguments
+if any(meaningful_args):
+run_cli_mode(args)
+else:
+# No meaningful arguments provided, so run interactive mode
+main()
+
+except KeyboardInterrupt:
+print(f"\n{Colors.WARNING}🛑 Application interrupted by user. Goodbye!{Colors.RESET}")
+sys.exit(0)
+except Exception as e:
+print(f"{Colors.ERROR}Fatal error: {str(e)}{Colors.RESET}")
+sys.exit(1)
